@@ -12,7 +12,7 @@ import {
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
   GraduationCap, ShoppingCart, Wallet, Home,
   CalendarOff, Check, Settings, Plane, Stethoscope, Building2, Loader2, Shield, Lock,
-  UserPlus, Mail,
+  UserPlus, Mail, Timer,
 } from "lucide-react";
 
 // ─── Firebase Config ───────────────────────────────────────────────
@@ -132,6 +132,10 @@ function EstiloGlobalVerdeOro() {
       /* Inputs y selects dentro de modales */
       input, select, textarea {
         background-color: rgba(255,255,255,0.06);
+        color: ${BLANCO};
+      }
+      select option {
+        background-color: ${VERDE_NEGRO};
         color: ${BLANCO};
       }
       input::placeholder, textarea::placeholder { color: ${BLANCO_TENUE}; }
@@ -412,6 +416,7 @@ function useAuthMantenimiento() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState(null);
   const [modulosActivos, setModulosActivos] = useState(null);
+  const [nombreOperario, setNombreOperario] = useState(null);
   const [cargandoAuth, setCargandoAuth] = useState(true);
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -420,6 +425,7 @@ function useAuthMantenimiento() {
         try {
           const snap = await getDoc(docUsuario(user.uid));
           setUserRole(snap.exists() ? (snap.data().role || "pendiente") : "pendiente");
+          setNombreOperario(snap.exists() ? (snap.data().nombre || null) : null);
         } catch (err) {
           console.error("Error al cargar rol:", err);
           setUserRole("pendiente");
@@ -434,12 +440,13 @@ function useAuthMantenimiento() {
       } else {
         setUserRole(null);
         setModulosActivos(null);
+        setNombreOperario(null);
       }
       setCargandoAuth(false);
     });
     return unsub;
   }, []);
-  return { currentUser, userRole, modulosActivos, cargandoAuth };
+  return { currentUser, userRole, modulosActivos, nombreOperario, cargandoAuth };
 }
 
 const inputLoginCls = "w-full px-3.5 py-2.5 rounded-xl bg-white/10 text-white text-sm border border-white/15 focus:outline-none focus:border-[#C6A253] placeholder-white/30 transition-colors";
@@ -555,7 +562,7 @@ function ModuloDesactivadoMantenimiento({ email }) {
 // APP
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
-  const { currentUser: usuario, userRole, modulosActivos, cargandoAuth } = useAuthMantenimiento();
+  const { currentUser: usuario, userRole, modulosActivos, nombreOperario, cargandoAuth } = useAuthMantenimiento();
   const [vista, setVista] = useState("dashboard");
   const [menuAbierto, setMenuAbierto] = useState(false);
 
@@ -566,6 +573,7 @@ export default function App() {
     ]},
     { label: "Operativa", items: [
       { id: "tareas", label: "Tareas de campo", Icon: ClipboardCheck },
+      { id: "registro_trabajo", label: "Registro de trabajo", Icon: Timer },
       { id: "partes", label: "Partes de incidencia", Icon: AlertTriangle },
       { id: "aplicaciones", label: "Aplicaciones", Icon: FlaskConical },
     ]},
@@ -583,7 +591,7 @@ export default function App() {
   const TITULOS = {
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones",
+    maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones",
   };
 
   if (cargandoAuth) {
@@ -683,6 +691,7 @@ export default function App() {
           {vista === "dashboard" && <Dashboard irA={setVista} />}
           {vista === "equipo" && <Equipo />}
           {vista === "tareas" && <Tareas />}
+          {vista === "registro_trabajo" && <RegistroTrabajo usuario={usuario} nombreOperario={nombreOperario} />}
           {vista === "partes" && <Partes />}
           {vista === "aplicaciones" && <Aplicaciones />}
           {vista === "maquinaria" && <Maquinaria />}
@@ -1406,6 +1415,131 @@ function ModalConfigCategoriasTarea({ open, onClose, categorias, onGuardar }) {
       </div>
       <div className="mt-5"><BotonPrimario onClick={guardar} icon={null}>Guardar configuracion</BotonPrimario></div>
     </Modal>
+  );
+}
+function RegistroTrabajo({ usuario, nombreOperario }) {
+  const { datos: tipos } = useColeccion("mant_tipos_tarea", "nombre", "asc");
+  const { datos: maquinas } = useColeccion("mant_maquinaria", "nombre", "asc");
+  const { datos: registros } = useColeccion("mant_registro_trabajo", "inicio", "desc");
+
+  const misRegistros = registros.filter((r) => r.operarioUid === usuario?.uid);
+  const enCurso = misRegistros.find((r) => !r.fin);
+  const historial = misRegistros.filter((r) => r.fin).slice(0, 15);
+
+  const [modalIniciar, setModalIniciar] = useState(false);
+  const [modalFinalizar, setModalFinalizar] = useState(false);
+  const [form, setForm] = useState({ tipoTareaId: "", maquinaId: "", horometroInicio: "" });
+  const [formFin, setFormFin] = useState({ horometroFin: "", litrosCombustible: "", notas: "" });
+
+  function abrirIniciar() {
+    setForm({ tipoTareaId: tipos[0]?.id || "", maquinaId: "", horometroInicio: "" });
+    setModalIniciar(true);
+  }
+
+  async function iniciar() {
+    if (!form.tipoTareaId) { alert("Elige un tipo de tarea."); return; }
+    const tipo = tipos.find((t) => t.id === form.tipoTareaId);
+    const maquina = maquinas.find((m) => m.id === form.maquinaId);
+    await crearDoc("mant_registro_trabajo", {
+      operarioUid: usuario.uid,
+      operarioNombre: nombreOperario || usuario.email,
+      tipoTareaId: form.tipoTareaId,
+      tipoTareaNombre: tipo?.nombre || "",
+      maquinaId: form.maquinaId || null,
+      maquinaNombre: maquina?.nombre || null,
+      horometroInicio: form.horometroInicio ? Number(form.horometroInicio) : null,
+      inicio: serverTimestamp(),
+      fin: null,
+    });
+    setModalIniciar(false);
+  }
+
+  function abrirFinalizar() {
+    setFormFin({ horometroFin: "", litrosCombustible: "", notas: "" });
+    setModalFinalizar(true);
+  }
+
+  async function finalizar() {
+    await actualizarDoc("mant_registro_trabajo", enCurso.id, {
+      fin: serverTimestamp(),
+      horometroFin: formFin.horometroFin ? Number(formFin.horometroFin) : null,
+      litrosCombustible: formFin.litrosCombustible ? Number(formFin.litrosCombustible) : null,
+      notas: formFin.notas || "",
+    });
+    setModalFinalizar(false);
+  }
+
+  function duracion(r) {
+    if (!r.inicio?.toDate || !r.fin?.toDate) return "-";
+    const ms = r.fin.toDate() - r.inicio.toDate();
+    const min = Math.round(ms / 60000);
+    if (min < 60) return `${min} min`;
+    return `${Math.floor(min / 60)}h ${min % 60}min`;
+  }
+
+  return (
+    <div>
+      <Cabecera titulo="Registro de trabajo" subtitulo="Inicia y finaliza tareas para registrar tiempos, maquinaria y combustible." />
+
+      {enCurso ? (
+        <Tarjeta className="p-5 mb-6" style={{ borderColor: DORADO }}>
+          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: DORADO }}>Tarea en curso</p>
+          <p className="font-semibold text-lg" style={{ color: BLANCO }}>{enCurso.tipoTareaNombre}</p>
+          {enCurso.maquinaNombre && <p className="text-sm text-stone-400">Maquina: {enCurso.maquinaNombre}</p>}
+          <BotonPrimario onClick={abrirFinalizar} className="mt-3">Finalizar tarea</BotonPrimario>
+        </Tarjeta>
+      ) : (
+        <BotonPrimario onClick={abrirIniciar} className="mb-6">Iniciar tarea</BotonPrimario>
+      )}
+      <p className="text-sm font-semibold mb-3" style={{ color: BLANCO }}>Historial reciente</p>
+      <div className="space-y-2">
+        {historial.length === 0 && <p className="text-sm text-stone-400">Sin registros todavia.</p>}
+        {historial.map((r) => (
+          <Tarjeta key={r.id} className="p-4 flex items-center justify-between">
+            <div>
+              <p className="font-medium" style={{ color: BLANCO }}>{r.tipoTareaNombre}</p>
+              <p className="text-xs text-stone-500">
+                {r.maquinaNombre ? `${r.maquinaNombre} · ` : ""}{duracion(r)}
+                {r.litrosCombustible ? ` · ${r.litrosCombustible} L` : ""}
+              </p>
+            </div>
+          </Tarjeta>
+        ))}
+      </div>
+
+      <Modal open={modalIniciar} onClose={() => setModalIniciar(false)} title="Iniciar tarea">
+        <Field label="Tipo de tarea">
+          <select className={inputCls} value={form.tipoTareaId} onChange={(e) => setForm({ ...form, tipoTareaId: e.target.value })}>
+            {tipos.map((t) => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+          </select>
+        </Field>
+        <Field label="Maquina (opcional)">
+          <select className={inputCls} value={form.maquinaId} onChange={(e) => setForm({ ...form, maquinaId: e.target.value })}>
+            <option value="">Sin maquina</option>
+            {maquinas.map((m) => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+          </select>
+        </Field>
+        {form.maquinaId && (
+          <Field label="Horometro inicial">
+            <input type="number" className={inputCls} value={form.horometroInicio} onChange={(e) => setForm({ ...form, horometroInicio: e.target.value })} />
+          </Field>
+        )}
+        <div className="mt-4"><BotonPrimario onClick={iniciar} icon={null}>Iniciar</BotonPrimario></div>
+      </Modal>
+
+      <Modal open={modalFinalizar} onClose={() => setModalFinalizar(false)} title="Finalizar tarea">
+        {enCurso?.maquinaId && (
+          <Field label="Horometro final">
+            <input type="number" className={inputCls} value={formFin.horometroFin} onChange={(e) => setFormFin({ ...formFin, horometroFin: e.target.value })} />
+          </Field>
+        )}
+        <Field label="Litros de combustible repostados (opcional)">
+          <input type="number" step="0.1" className={inputCls} value={formFin.litrosCombustible} onChange={(e) => setFormFin({ ...formFin, litrosCombustible: e.target.value })} />
+        </Field>
+        <Field label="Notas"><textarea className={inputCls} rows={2} value={formFin.notas} onChange={(e) => setFormFin({ ...formFin, notas: e.target.value })} /></Field>
+        <div className="mt-4"><BotonPrimario onClick={finalizar} icon={null}>Finalizar</BotonPrimario></div>
+      </Modal>
+    </div>
   );
 }
 function cargarJsPDF() {
