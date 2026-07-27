@@ -12,7 +12,7 @@ import {
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
   GraduationCap, ShoppingCart, Wallet, Home,
   CalendarOff, Check, Settings, Plane, Stethoscope, Building2, Loader2, Shield, Lock,
-  UserPlus, Mail, Timer,
+  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3,
 } from "lucide-react";
 
 // ─── Firebase Config ───────────────────────────────────────────────
@@ -563,7 +563,13 @@ function ModuloDesactivadoMantenimiento({ email }) {
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
   const { currentUser: usuario, userRole, modulosActivos, nombreOperario, cargandoAuth } = useAuthMantenimiento();
+  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes"];
   const [vista, setVista] = useState("dashboard");
+  useEffect(() => {
+    if (userRole === "jardinero" && !VISTAS_JARDINERO.includes(vista)) {
+      setVista("registro_trabajo");
+    }
+  }, [userRole, vista]);
   const [menuAbierto, setMenuAbierto] = useState(false);
 
   // Navegación agrupada por bloques, al estilo del panel de Finanzas
@@ -574,6 +580,8 @@ export default function App() {
     { label: "Operativa", items: [
       { id: "tareas", label: "Tareas de campo", Icon: ClipboardCheck },
       { id: "registro_trabajo", label: "Registro de trabajo", Icon: Timer },
+      { id: "planificacion", label: "Planificacion", Icon: Calendar },
+      { id: "carga_trabajo", label: "Carga de trabajo", Icon: BarChart3 },
       { id: "partes", label: "Partes de incidencia", Icon: AlertTriangle },
       { id: "aplicaciones", label: "Aplicaciones", Icon: FlaskConical },
     ]},
@@ -586,12 +594,18 @@ export default function App() {
       { id: "fichajes", label: "Fichajes", Icon: Clock },
       { id: "ausencias", label: "Ausencias y vacaciones", Icon: CalendarOff },
     ]},
-  ];
+  ].map((grupo) => ({
+    ...grupo,
+    items: grupo.items.filter((it) => {
+      if (userRole !== "jardinero") return true;
+      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes"].includes(it.id);
+    }),
+  })).filter((grupo) => grupo.items.length > 0);
 
   const TITULOS = {
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones",
+    maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones",
   };
 
   if (cargandoAuth) {
@@ -692,6 +706,8 @@ export default function App() {
           {vista === "equipo" && <Equipo />}
           {vista === "tareas" && <Tareas />}
           {vista === "registro_trabajo" && <RegistroTrabajo usuario={usuario} nombreOperario={nombreOperario} />}
+          {vista === "planificacion" && <PlanificacionSemanal userRole={userRole} />}
+          {vista === "carga_trabajo" && <CargaTrabajo />}
           {vista === "partes" && <Partes />}
           {vista === "aplicaciones" && <Aplicaciones />}
           {vista === "maquinaria" && <Maquinaria />}
@@ -1539,6 +1555,263 @@ function RegistroTrabajo({ usuario, nombreOperario }) {
         <Field label="Notas"><textarea className={inputCls} rows={2} value={formFin.notas} onChange={(e) => setFormFin({ ...formFin, notas: e.target.value })} /></Field>
         <div className="mt-4"><BotonPrimario onClick={finalizar} icon={null}>Finalizar</BotonPrimario></div>
       </Modal>
+    </div>
+  );
+}
+function PlanificacionSemanal({ userRole }) {
+  const soloLectura = userRole === "jardinero";
+  const { datos: equipo } = useColeccion("mant_equipo", "nombre", "asc");
+  const { datos: tipos } = useColeccion("mant_tipos_tarea", "nombre", "asc");
+  const { datos: asignaciones } = useColeccion("mant_planificacion", "fecha", "asc");
+
+  function lunesDeSemana(d) {
+    const dia = d.getDay();
+    const offset = dia === 0 ? -6 : 1 - dia;
+    const l = new Date(d);
+    l.setDate(d.getDate() + offset);
+    l.setHours(0, 0, 0, 0);
+    return l;
+  }
+
+  const [inicioSemana, setInicioSemana] = useState(lunesDeSemana(new Date()));
+  const [arrastrando, setArrastrando] = useState(null);
+
+  const dias = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(inicioSemana);
+    d.setDate(inicioSemana.getDate() + i);
+    return d;
+  });
+
+  function fechaISO(d) {
+    return d.toISOString().slice(0, 10);
+  }
+
+  const NOMBRES_DIA = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"];
+
+  function asignacionesDe(operarioId, fecha) {
+    return asignaciones
+      .filter((a) => a.operarioId === operarioId && a.fecha === fecha)
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  }
+
+  async function moverOrden(item, items, delta) {
+    const idx = items.findIndex((x) => x.id === item.id);
+    const nuevoIdx = idx + delta;
+    const vecino = items[nuevoIdx];
+    if (!vecino) return;
+    await actualizarDoc("mant_planificacion", item.id, { orden: nuevoIdx });
+    await actualizarDoc("mant_planificacion", vecino.id, { orden: idx });
+  }
+
+  async function soltarEnCasilla(operarioId, fecha) {
+    if (!arrastrando) return;
+    if (arrastrando.tipo === "catalogo") {
+      const tipo = tipos.find((t) => t.id === arrastrando.tipoTareaId);
+      const existentes = asignacionesDe(operarioId, fecha);
+      const ordenMax = existentes.reduce((m, a) => Math.max(m, a.orden || 0), -1);
+      await crearDoc("mant_planificacion", {
+        operarioId,
+        fecha,
+        tipoTareaId: arrastrando.tipoTareaId,
+        tipoTareaNombre: tipo?.nombre || "",
+        orden: ordenMax + 1,
+      });
+    } else if (arrastrando.tipo === "asignacion") {
+      await actualizarDoc("mant_planificacion", arrastrando.id, { operarioId, fecha });
+    }
+    setArrastrando(null);
+  }
+
+  async function quitarAsignacion(id) {
+    if (!confirm("Quitar esta tarea planificada?")) return;
+    await borrarDoc("mant_planificacion", id);
+  }
+
+  function cambiarSemana(delta) {
+    const n = new Date(inicioSemana);
+    n.setDate(inicioSemana.getDate() + delta * 7);
+    setInicioSemana(n);
+  }
+
+  return (
+    <div>
+      <Cabecera titulo="Planificacion" subtitulo="Arrastra tareas del catalogo a cada operario y dia de la semana.">
+        <div className="flex items-center gap-2">
+          <button onClick={() => cambiarSemana(-1)} className="p-2 rounded-lg hover:bg-white/5" style={{ color: BLANCO }}><ChevronLeft size={18} /></button>
+          <span className="text-sm" style={{ color: BLANCO }}>
+            {dias[0].toLocaleDateString("es-ES", { day: "2-digit", month: "short" })} - {dias[6].toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}
+          </span>
+          <button onClick={() => cambiarSemana(1)} className="p-2 rounded-lg hover:bg-white/5" style={{ color: BLANCO }}><ChevronRight size={18} /></button>
+        </div>
+      </Cabecera>
+
+      <div className="flex gap-6">
+        {!soloLectura && <div className="w-56 shrink-0">
+          <p className="text-xs uppercase tracking-wide mb-2" style={{ color: DORADO }}>Catalogo de tareas</p>
+          <div className="space-y-2">
+            {tipos.map((t) => (
+              <div
+                key={t.id}
+                draggable
+                onDragStart={() => setArrastrando({ tipo: "catalogo", tipoTareaId: t.id })}
+                className="p-2.5 rounded-lg text-sm cursor-grab flex items-center gap-2"
+                style={{ background: VERDE_TARJETA, color: BLANCO, border: `1px solid ${DORADO_SUAVE}` }}
+              >
+                <GripVertical size={14} style={{ color: DORADO }} />
+                {t.nombre}
+              </div>
+            ))}
+          </div>
+        </div>}
+
+        <div className="flex-1 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                <th className="text-left p-2" style={{ color: BLANCO_SUAVE }}>Operario</th>
+                {dias.map((d) => (
+                  <th key={fechaISO(d)} className="p-2 text-center" style={{ color: BLANCO_SUAVE }}>
+                    {NOMBRES_DIA[(d.getDay() + 6) % 7]}<br />
+                    <span className="text-xs font-normal">{d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" })}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {equipo.map((op) => (
+                <tr key={op.id}>
+                  <td className="p-2 font-medium" style={{ color: BLANCO }}>{op.nombre}</td>
+                  {dias.map((d) => {
+                    const fecha = fechaISO(d);
+                    const items = asignacionesDe(op.id, fecha);
+                    return (
+                      <td
+                        key={fecha}
+                        onDragOver={(e) => !soloLectura && e.preventDefault()}
+                        onDrop={() => !soloLectura && soltarEnCasilla(op.id, fecha)}
+                        className="p-1.5 align-top min-w-[110px]"
+                        style={{ background: "rgba(255,255,255,0.02)", border: `1px solid ${DORADO_SUAVE}` }}
+                      >
+                        <div className="space-y-1">
+                          {items.map((a, idx) => (
+                            <div
+                              key={a.id}
+                              draggable={!soloLectura}
+                              onDragStart={() => !soloLectura && setArrastrando({ tipo: "asignacion", id: a.id })}
+                              className={`p-1.5 rounded text-xs flex items-center justify-between gap-1 ${soloLectura ? "" : "cursor-grab"}`}
+                              style={{ background: DORADO_SUAVE, color: BLANCO }}
+                            >
+                              <span className="truncate flex-1">{a.tipoTareaNombre}</span>
+                              {!soloLectura && (
+                                <div className="flex items-center gap-0.5 shrink-0">
+                                  <button onClick={() => moverOrden(a, items, -1)} disabled={idx === 0} className="hover:opacity-70 disabled:opacity-20"><ChevronUp size={12} /></button>
+                                  <button onClick={() => moverOrden(a, items, 1)} disabled={idx === items.length - 1} className="hover:opacity-70 disabled:opacity-20"><ChevronDown size={12} /></button>
+                                  <button onClick={() => quitarAsignacion(a.id)} className="hover:opacity-70"><X size={12} /></button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+function CargaTrabajo() {
+  const { datos: equipo } = useColeccion("mant_equipo", "nombre", "asc");
+  const { datos: asignaciones } = useColeccion("mant_planificacion", "fecha", "asc");
+
+  const [periodo, setPeriodo] = useState("mensual");
+  const [offset, setOffset] = useState(0);
+
+  function rangoPeriodo(tipo, offset) {
+    const hoy = new Date();
+    if (tipo === "mensual") {
+      const base = new Date(hoy.getFullYear(), hoy.getMonth() + offset, 1);
+      const fin = new Date(hoy.getFullYear(), hoy.getMonth() + offset + 1, 0);
+      return { desde: base, hasta: fin, etiqueta: base.toLocaleDateString("es-ES", { month: "long", year: "numeric" }) };
+    }
+    if (tipo === "trimestral") {
+      const trimestreActual = Math.floor(hoy.getMonth() / 3);
+      const base = new Date(hoy.getFullYear(), (trimestreActual + offset) * 3, 1);
+      const fin = new Date(base.getFullYear(), base.getMonth() + 3, 0);
+      return { desde: base, hasta: fin, etiqueta: `T${Math.floor(base.getMonth() / 3) + 1} ${base.getFullYear()}` };
+    }
+    if (tipo === "semestral") {
+      const semestreActual = Math.floor(hoy.getMonth() / 6);
+      const base = new Date(hoy.getFullYear(), (semestreActual + offset) * 6, 1);
+      const fin = new Date(base.getFullYear(), base.getMonth() + 6, 0);
+      return { desde: base, hasta: fin, etiqueta: `S${Math.floor(base.getMonth() / 6) + 1} ${base.getFullYear()}` };
+    }
+    const base = new Date(hoy.getFullYear() + offset, 0, 1);
+    const fin = new Date(hoy.getFullYear() + offset, 11, 31);
+    return { desde: base, hasta: fin, etiqueta: `${base.getFullYear()}` };
+  }
+
+  const { desde, hasta, etiqueta } = rangoPeriodo(periodo, offset);
+
+  function fechaISO(d) {
+    return d.toISOString().slice(0, 10);
+  }
+
+  const enRango = asignaciones.filter((a) => a.fecha >= fechaISO(desde) && a.fecha <= fechaISO(hasta));
+
+  function resumenOperario(operarioId) {
+    const suyas = enRango.filter((a) => a.operarioId === operarioId);
+    const porTipo = {};
+    suyas.forEach((a) => {
+      porTipo[a.tipoTareaNombre] = (porTipo[a.tipoTareaNombre] || 0) + 1;
+    });
+    return { total: suyas.length, porTipo };
+  }
+
+  return (
+    <div>
+      <Cabecera titulo="Carga de trabajo" subtitulo="Resumen de tareas planificadas por operario y periodo.">
+        <div className="flex items-center gap-2">
+          <select className={inputCls} value={periodo} onChange={(e) => { setPeriodo(e.target.value); setOffset(0); }}>
+            <option value="mensual">Mensual</option>
+            <option value="trimestral">Trimestral</option>
+            <option value="semestral">Semestral</option>
+            <option value="anual">Anual</option>
+          </select>
+          <button onClick={() => setOffset(offset - 1)} className="p-2 rounded-lg hover:bg-white/5" style={{ color: BLANCO }}><ChevronLeft size={18} /></button>
+          <span className="text-sm capitalize" style={{ color: BLANCO }}>{etiqueta}</span>
+          <button onClick={() => setOffset(offset + 1)} className="p-2 rounded-lg hover:bg-white/5" style={{ color: BLANCO }}><ChevronRight size={18} /></button>
+        </div>
+      </Cabecera>
+
+      <div className="space-y-3">
+        {equipo.map((op) => {
+          const r = resumenOperario(op.id);
+          return (
+            <Tarjeta key={op.id} className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-semibold" style={{ color: BLANCO }}>{op.nombre}</p>
+                <span className="text-sm" style={{ color: DORADO }}>{r.total} tareas</span>
+              </div>
+              {Object.keys(r.porTipo).length === 0 ? (
+                <p className="text-xs text-stone-500">Sin tareas planificadas en este periodo.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(r.porTipo).map(([nombre, cant]) => (
+                    <span key={nombre} className="text-xs px-2 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: BLANCO_SUAVE }}>
+                      {nombre} - {cant}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </Tarjeta>
+          );
+        })}
+      </div>
     </div>
   );
 }
