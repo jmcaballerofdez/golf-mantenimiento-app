@@ -768,7 +768,7 @@ function descargarCsvInf(nombre, filas) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 // filas: [{ fecha:"YYYY-MM-DD", tarea, persona, minutos, inicio?, fin?, nota? }]
-function InformeHorasVista({ titulo, subtitulo, filas, sinTerminar = 0, nombreArchivo }) {
+function InformeHorasVista({ titulo, subtitulo, filas, pendientes = [], nombreArchivo }) {
   const hoy = new Date();
   const [rango, setRango] = useState("mes");
   const [pDesde, setPDesde] = useState(isoLocalInf(new Date(hoy.getFullYear(), hoy.getMonth(), 1)));
@@ -785,6 +785,7 @@ function InformeHorasVista({ titulo, subtitulo, filas, sinTerminar = 0, nombreAr
   const personas = Array.from(new Set(filas.map((f) => f.persona))).sort();
   const sel = filas.filter((f) => f.fecha >= desde && f.fecha <= hasta && (persona === "Todos" || f.persona === persona));
   const total = sel.reduce((s, f) => s + f.minutos, 0);
+  const sinTerminar = pendientes.filter((f) => f.fecha >= desde && f.fecha <= hasta && (persona === "Todos" || f.persona === persona)).length;
 
   function agrupar(clave, sub) {
     const m = {};
@@ -889,16 +890,16 @@ function InformeHorasMant() {
   const { datos: registros } = useColeccion("mant_registro_trabajo", "inicio", "desc");
   const hh = (d) => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   const filas = [];
-  let sinTerminar = 0;
+  const pendientes = [];
   registros.forEach((r) => {
     if (!r.inicio?.toDate) return;
-    if (!r.fin?.toDate) { sinTerminar += 1; return; }
+    if (!r.fin?.toDate) { pendientes.push({ fecha: isoLocalInf(r.inicio.toDate()), persona: r.operarioNombre || "Sin nombre" }); return; }
     const a = r.inicio.toDate(), b = r.fin.toDate();
     const min = Math.round((b - a) / 60000);
     if (min < 0) return;
     filas.push({ fecha: isoLocalInf(a), tarea: r.tipoTareaNombre || "Sin tipo", persona: r.operarioNombre || "Sin nombre", minutos: min, inicio: hh(a), fin: hh(b) });
   });
-  return <InformeHorasVista titulo="Informe de horas por tarea" subtitulo="Tiempo dedicado a cada tarea registrada por el equipo de Mantenimiento." filas={filas} sinTerminar={sinTerminar} nombreArchivo="horas_mantenimiento" />;
+  return <InformeHorasVista titulo="Informe de horas por tarea" subtitulo="Tiempo dedicado a cada tarea registrada por el equipo de Mantenimiento." filas={filas} pendientes={pendientes} nombreArchivo="horas_mantenimiento" />;
 }
 
 export default function App() {
@@ -1855,7 +1856,7 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
   return (
     <div>
       <Cabecera titulo="Registro de trabajo" subtitulo="Inicia y finaliza tareas para registrar tiempos, maquinaria y combustible.">
-        {userRole !== "jardinero" && (
+        {userRole === "superadmin" && (
           <BotonSecundario onClick={() => setMostrarInformes(true)} icon={BarChart3}>Informes</BotonSecundario>
         )}
       </Cabecera>
@@ -2342,7 +2343,7 @@ function Fichajes({ userRole, nombreOperario }) {
     ? [{ id: "registro", label: "Fichar" }]
     : [
         { id: "registro", label: "Fichar" },
-        { id: "informes", label: "Informes" },
+        ...(userRole === "superadmin" ? [{ id: "informes", label: "Informes" }] : []),
         { id: "corregir", label: "Corregir" },
       ];
 
@@ -2356,7 +2357,7 @@ function Fichajes({ userRole, nombreOperario }) {
         </div>
       </Cabecera>
       {tab === "registro" && <FichajeRegistro userRole={userRole} nombreOperario={nombreOperario} />}
-      {tab === "informes" && <FichajeInformes />}
+      {tab === "informes" && userRole === "superadmin" && <FichajeInformes />}
       {tab === "corregir" && (
         adminOk ? <FichajeCorreccion admin={adminOk} onSalir={() => setAdminOk(null)} /> : <AdminGate onOk={setAdminOk} />
       )}
@@ -3601,7 +3602,7 @@ function Caudalimetro({ usuario, nombreOperario, userRole }) {
         {userRole !== "jardinero" && (
           <>
             <BotonSecundario onClick={() => setModalConfig(true)} icon={Settings}>Configurar caudalimetros</BotonSecundario>
-            <BotonSecundario onClick={() => setModalInformes(true)} icon={BarChart3}>Informes</BotonSecundario>
+            {userRole === "superadmin" && <BotonSecundario onClick={() => setModalInformes(true)} icon={BarChart3}>Informes</BotonSecundario>}
           </>
         )}
       </Cabecera>
