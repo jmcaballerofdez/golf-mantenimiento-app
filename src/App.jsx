@@ -909,6 +909,181 @@ function InformeHorasMant() {
   return <InformeHorasVista titulo="Informe de horas por tarea" subtitulo="Tiempo dedicado a cada tarea registrada por el equipo de Mantenimiento." filas={filas} pendientes={pendientes} nombreArchivo="horas_mantenimiento" />;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// MI AGENDA (solo superadmin): eventos personales compartidos entre todas las apps
+// (clubes/ciudad-real/agenda_personal) + clases de Academia en solo lectura.
+// ═══════════════════════════════════════════════════════════════════
+const MA_DIAS = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+const MA_H = 28;
+const maIso = (d) => d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+const maSuma = (iso, n) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return maIso(d); };
+const maLunes = (iso) => { const d = new Date(iso + "T12:00:00"); return maSuma(iso, -((d.getDay() + 6) % 7)); };
+const maMin = (h) => { const [a, b] = String(h || "0:0").split(":"); return (Number(a) || 0) * 60 + (Number(b) || 0); };
+const maHora = (m) => String(Math.floor(m / 60)).padStart(2,"0") + ":" + String(m % 60).padStart(2,"0");
+
+function MiAgendaVista({ db, F }) {
+  const [lunes, setLunes] = useState(() => maLunes(maIso(new Date())));
+  const [personales, setPersonales] = useState([]);
+  const [datos, setDatos] = useState({});
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({});
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const u1 = F.onSnapshot(F.collection(db, "clubes", "ciudad-real", "agenda_personal"),
+      (s) => setPersonales(s.docs.map((d) => ({ ...d.data(), id: d.id, personal: true }))),
+      (e) => setError("No se pudo leer la agenda personal: " + e.message));
+    const u2 = F.onSnapshot(F.doc(db, "academia", "datos"),
+      (s) => setDatos(s.exists() ? s.data() : {}),
+      (e) => console.warn("Academia:", e));
+    return () => { u1(); u2(); };
+  }, []);
+
+  const dias = [0,1,2,3,4,5,6].map((i) => maSuma(lunes, i));
+  const domingo = dias[6];
+  const hoy = maIso(new Date());
+
+  // Clases de Academia (solo lectura), incluidas las automáticas de infantil
+  const clases = [];
+  (datos.agendaAdultos || []).forEach((e) => { if (e.tipo !== "personal" && !e.cancelada && e.fecha >= lunes && e.fecha <= domingo) clases.push({ id: e.id, fecha: e.fecha, hora: e.hora, durMin: (e.dur || 2) * 30, titulo: e.titulo || "Clase", tipo: e.tipo }); });
+  const omit = datos.agendaOmitidas || [];
+  (datos.gruposCurso || []).forEach((g) => {
+    const di = ["lunes","martes","miercoles","jueves","viernes","sabado","domingo"].findIndex((x) => (g.dia || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").startsWith(x));
+    if (di < 0 || !g.horaIni) return;
+    const f = dias[di]; if (f < "2026-10-18") return;
+    const ini = Math.floor(maMin(g.horaIni) / 30) * 30;
+    const fin = g.horaFin ? maMin(g.horaFin) : ini + 60;
+    const hora = maHora(ini);
+    if ((datos.agendaAdultos || []).some((e) => e.fecha === f && e.tipo !== "personal" && e.hora === hora)) return;
+    if (omit.includes("auto-" + g.id + "-" + f)) return;
+    clases.push({ id: "auto-" + g.id + "-" + f, fecha: f, hora, durMin: Math.max(30, fin - ini), titulo: g.nombre || "Grupo infantil", tipo: "escuela" });
+  });
+  const pers = personales.filter((e) => e.fecha >= lunes && e.fecha <= domingo);
+
+  const ini0 = 8 * 60, fin0 = 21 * 60;
+  const alto = ((fin0 - ini0) / 30) * MA_H;
+  const topDe = (h) => ((Math.max(maMin(h), ini0) - ini0) / 30) * MA_H;
+
+  function carriles(evs) {
+    const o = [...evs].sort((a, b) => maMin(a.hora) - maMin(b.hora));
+    const fines = []; const res = {};
+    o.forEach((e) => { const i = maMin(e.hora), f = i + e.durMin; let l = fines.findIndex((x) => x <= i); if (l < 0) { l = fines.length; fines.push(0); } fines[l] = f; res[e.id] = { lane: l, n: 1, i, f }; });
+    o.forEach((e) => { const r = res[e.id]; let mx = r.lane; o.forEach((x) => { const q = res[x.id]; if (q.i < r.f && q.f > r.i) mx = Math.max(mx, q.lane); }); r.n = mx + 1; });
+    return res;
+  }
+
+  function nuevo(fecha, hora) { setForm({ fecha, hora, durMin: 60, titulo: "", nota: "" }); setModal("new"); setError(""); }
+  function editar(e) { setForm({ fecha: e.fecha, hora: e.hora, durMin: e.durMin || 60, titulo: e.titulo || "", nota: e.nota || "" }); setModal(e.id); setError(""); }
+  async function guardar() {
+    if (!form.fecha || !form.hora) return;
+    const reg = { titulo: (form.titulo || "").trim() || "Reunión", fecha: form.fecha, hora: form.hora, durMin: Math.max(5, Number(form.durMin) || 60), nota: (form.nota || "").trim() };
+    try {
+      if (modal === "new") await F.addDoc(F.collection(db, "clubes", "ciudad-real", "agenda_personal"), { ...reg, creadoEn: Date.now() });
+      else await F.updateDoc(F.doc(db, "clubes", "ciudad-real", "agenda_personal", modal), reg);
+      setModal(null);
+    } catch (e) { setError("No se pudo guardar: " + e.message); }
+  }
+  async function borrar() {
+    if (modal === "new" || !window.confirm("¿Eliminar este evento?")) return;
+    try { await F.deleteDoc(F.doc(db, "clubes", "ciudad-real", "agenda_personal", modal)); setModal(null); }
+    catch (e) { setError("No se pudo eliminar: " + e.message); }
+  }
+
+  const colores = { individual: ["#E3ECFC", "#2A5FD9"], grupo: ["#ECE6F8", "#6B4FBB"], curso: ["#FBEBD8", "#B0651A"], escuela: ["#DDF2E6", "#2E8B57"] };
+  const fmt = (iso) => { const d = new Date(iso + "T12:00:00"); return d.toLocaleDateString("es-ES", { day: "numeric", month: "short" }); };
+  const inp = { width: "100%", border: "1.5px solid #C7D2DC", borderRadius: 8, padding: "8px 10px", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" };
+  const btn = (bg, col) => ({ background: bg, color: col, border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" });
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <button style={btn("#E6EBF0", "#333")} onClick={() => setLunes(maSuma(lunes, -7))}>◀</button>
+        <button style={btn("#E6EBF0", "#333")} onClick={() => setLunes(maLunes(hoy))}>Hoy</button>
+        <button style={btn("#E6EBF0", "#333")} onClick={() => setLunes(maSuma(lunes, 7))}>▶</button>
+        <div style={{ fontWeight: 800, fontSize: 15 }}>{fmt(lunes)} – {fmt(domingo)}</div>
+        <div style={{ flex: 1 }} />
+        <button style={btn("#2F6B3F", "#fff")} onClick={() => nuevo(hoy >= lunes && hoy <= domingo ? hoy : lunes, "10:00")}>+ Evento</button>
+      </div>
+      {error && <div style={{ background: "#FBE4E1", color: "#C0392B", padding: 8, borderRadius: 8, fontSize: 13, marginBottom: 10 }}>{error}</div>}
+      <div style={{ overflowX: "auto", border: "1px solid #DCE4EB", borderRadius: 12, background: "#fff" }}>
+        <div style={{ minWidth: 720, display: "grid", gridTemplateColumns: "48px repeat(7,1fr)" }}>
+          <div style={{ background: "#F5F8FA", borderBottom: "1px solid #DCE4EB" }} />
+          {dias.map((f, i) => (
+            <div key={f} style={{ padding: "6px 4px", textAlign: "center", fontSize: 12, fontWeight: 700, borderBottom: "1px solid #DCE4EB", borderLeft: "1px solid #EEF2F5", background: f === hoy ? "#2F6B3F" : "#F5F8FA", color: f === hoy ? "#fff" : "#222" }}>
+              {MA_DIAS[i]} {new Date(f + "T12:00:00").getDate()}
+            </div>
+          ))}
+          <div style={{ position: "relative", height: alto }}>
+            {Array.from({ length: (fin0 - ini0) / 60 }, (_, k) => (
+              <div key={k} style={{ position: "absolute", top: k * 2 * MA_H, width: "100%", fontSize: 10, color: "#6b7a86", textAlign: "right", paddingRight: 5, boxSizing: "border-box" }}>{maHora(ini0 + k * 60)}</div>
+            ))}
+          </div>
+          {dias.map((f) => {
+            const evs = [...clases.filter((c) => c.fecha === f), ...pers.filter((p) => p.fecha === f).map((p) => ({ ...p, durMin: p.durMin || 60 }))];
+            const car = carriles(evs);
+            return (
+              <div key={f} style={{ position: "relative", height: alto, borderLeft: "1px solid #EEF2F5" }}>
+                {Array.from({ length: (fin0 - ini0) / 30 }, (_, k) => (
+                  <div key={k} onClick={() => nuevo(f, maHora(ini0 + k * 30))} style={{ position: "absolute", top: k * MA_H, height: MA_H, width: "100%", boxSizing: "border-box", cursor: "pointer", borderTop: k % 2 === 0 ? "1px solid #DCE4EB" : "1px dotted #E8EEF3" }} />
+                ))}
+                {evs.map((e) => {
+                  const c = car[e.id] || { lane: 0, n: 1 };
+                  const col = e.personal ? ["#E6EBF0", "#5C7284"] : (colores[e.tipo] || colores.individual);
+                  return (
+                    <div key={e.id} onClick={(ev) => { ev.stopPropagation(); e.personal ? editar(e) : setInfo(e); }}
+                      style={{ position: "absolute", top: topDe(e.hora) + 1, height: Math.max(15, e.durMin / 30 * MA_H) - 2, left: "calc(" + (c.lane * 100 / c.n) + "% + 2px)", width: "calc(" + (100 / c.n) + "% - 4px)", boxSizing: "border-box", overflow: "hidden", cursor: "pointer", background: col[0], borderLeft: "4px solid " + col[1], borderRadius: 6, padding: "2px 5px", fontSize: 11, lineHeight: 1.25, boxShadow: "0 1px 2px rgba(0,0,0,.08)", opacity: e.personal ? 1 : 0.9 }}>
+                      <div style={{ fontWeight: 700, color: col[1] }}>{e.personal ? "" : "🎓 "}{e.titulo}</div>
+                      <div style={{ color: "#6b7a86", fontSize: 10 }}>{e.hora}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: "#6b7a86", marginTop: 8 }}>Pulsa en una hora vacía para añadir un evento. Los eventos grises son tuyos y se sincronizan en todas las apps. Las clases (🎓) se editan en Academia.</div>
+
+      {modal && (
+        <div onClick={() => setModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 18, width: "100%", maxWidth: 440 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>{modal === "new" ? "Nuevo evento" : "Editar evento"}</div>
+            <label style={{ fontSize: 12, color: "#6b7a86" }}>Título</label>
+            <input style={{ ...inp, marginBottom: 10 }} value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Ej: Reunión con proveedor" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Fecha</label><input type="date" style={inp} value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></div>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Hora</label><input type="time" style={inp} value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></div>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Duración (min)</label><input type="number" style={inp} value={form.durMin} onChange={(e) => setForm({ ...form, durMin: e.target.value })} /></div>
+            </div>
+            <label style={{ fontSize: 12, color: "#6b7a86" }}>Nota</label>
+            <textarea rows={2} style={{ ...inp, marginBottom: 12 }} value={form.nota} onChange={(e) => setForm({ ...form, nota: e.target.value })} />
+            {error && <div style={{ color: "#C0392B", fontSize: 12, marginBottom: 8 }}>{error}</div>}
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <div>{modal !== "new" && <button style={btn("#FBE4E1", "#C0392B")} onClick={borrar}>Eliminar</button>}</div>
+              <div style={{ display: "flex", gap: 8 }}><button style={btn("#E6EBF0", "#333")} onClick={() => setModal(null)}>Cancelar</button><button style={btn("#2F6B3F", "#fff")} onClick={guardar}>Guardar</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {info && (
+        <div onClick={() => setInfo(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 18, width: "100%", maxWidth: 380 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>🎓 {info.titulo}</div>
+            <div style={{ fontSize: 14, marginBottom: 12 }}>{new Date(info.fecha + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {info.hora} ({info.durMin} min)</div>
+            <div style={{ fontSize: 12, color: "#6b7a86", marginBottom: 14 }}>Las clases se editan en Academia (ahí están los alumnos, la asistencia y los cobros).</div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <button style={btn("#E6EBF0", "#333")} onClick={() => setInfo(null)}>Cerrar</button>
+              <a href="https://academia.golfb.es/" target="_blank" rel="noreferrer" style={{ ...btn("#2F6B3F", "#fff"), textDecoration: "none" }}>Abrir Academia</a>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+const MI_AGENDA_F = { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc };
+
 export default function App() {
   const { currentUser: usuario, userRole, modulosActivos, nombreOperario, empleadoId, cargandoAuth } = useAuthMantenimiento();
   const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "parte_diario", "ausencias", "mis_documentos"];
@@ -925,6 +1100,7 @@ export default function App() {
     { label: "Principal", items: [
       { id: "dashboard", label: "Panel", Icon: LayoutDashboard },
       { id: "mis_documentos", label: "Mis documentos", Icon: Lock },
+      ...(userRole === "superadmin" ? [{ id: "mi_agenda", label: "Mi agenda", Icon: Calendar }] : []),
     ]},
     { label: "Operativa", items: [
       { id: "tareas", label: "Tareas de campo", Icon: ClipboardCheck },
@@ -959,6 +1135,7 @@ export default function App() {
   })).filter((grupo) => grupo.items.length > 0);
 
   const TITULOS = {
+    mi_agenda: "Mi agenda",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
     maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
@@ -1079,6 +1256,7 @@ export default function App() {
           {vista === "mis_documentos" && <MisDocumentos usuario={usuario} />}
           {vista === "documentos_admin" && userRole === "superadmin" && <DocumentosAdmin nombreOperario={nombreOperario} />}
           {vista === "informe_horas" && userRole === "superadmin" && <InformeHorasMant />}
+          {vista === "mi_agenda" && userRole === "superadmin" && <MiAgendaVista db={db} F={MI_AGENDA_F} />}
           {vista === "ausencias" && (userRole === "jardinero" ? <MisAusencias nombreOperario={nombreOperario} /> : <Ausencias />)}
         </main>
       </div>
