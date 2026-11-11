@@ -992,11 +992,11 @@ function MiAgendaVista({ db, F }) {
 
   const colores = { individual: ["#E3ECFC", "#2A5FD9"], grupo: ["#ECE6F8", "#6B4FBB"], curso: ["#FBEBD8", "#B0651A"], escuela: ["#DDF2E6", "#2E8B57"] };
   const fmt = (iso) => { const d = new Date(iso + "T12:00:00"); return d.toLocaleDateString("es-ES", { day: "numeric", month: "short" }); };
-  const inp = { width: "100%", border: "1.5px solid #C7D2DC", borderRadius: 8, padding: "8px 10px", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" };
+  const inp = { color: "#1f2a33", background: "#fff", width: "100%", border: "1.5px solid #C7D2DC", borderRadius: 8, padding: "8px 10px", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" };
   const btn = (bg, col) => ({ background: bg, color: col, border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" });
 
   return (
-    <div>
+    <div style={{ color: "#f3f6f4" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <button style={btn("#E6EBF0", "#333")} onClick={() => setLunes(maSuma(lunes, -7))}>◀</button>
         <button style={btn("#E6EBF0", "#333")} onClick={() => setLunes(maLunes(hoy))}>Hoy</button>
@@ -1006,7 +1006,7 @@ function MiAgendaVista({ db, F }) {
         <button style={btn("#2F6B3F", "#fff")} onClick={() => nuevo(hoy >= lunes && hoy <= domingo ? hoy : lunes, "10:00")}>+ Evento</button>
       </div>
       {error && <div style={{ background: "#FBE4E1", color: "#C0392B", padding: 8, borderRadius: 8, fontSize: 13, marginBottom: 10 }}>{error}</div>}
-      <div style={{ overflowX: "auto", border: "1px solid #DCE4EB", borderRadius: 12, background: "#fff" }}>
+      <div style={{ overflowX: "auto", border: "1px solid #DCE4EB", borderRadius: 12, background: "#fff", color: "#1f2a33" }}>
         <div style={{ minWidth: 720, display: "grid", gridTemplateColumns: "48px repeat(7,1fr)" }}>
           <div style={{ background: "#F5F8FA", borderBottom: "1px solid #DCE4EB" }} />
           {dias.map((f, i) => (
@@ -1043,11 +1043,11 @@ function MiAgendaVista({ db, F }) {
           })}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: "#6b7a86", marginTop: 8 }}>Pulsa en una hora vacía para añadir un evento. Los eventos grises son tuyos y se sincronizan en todas las apps. Las clases (🎓) se editan en Academia.</div>
+      <div style={{ fontSize: 11, color: "#c9d3cc", marginTop: 8 }}>Pulsa en una hora vacía para añadir un evento. Los eventos grises son tuyos y se sincronizan en todas las apps. Las clases (🎓) se editan en Academia.</div>
 
       {modal && (
         <div onClick={() => setModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 18, width: "100%", maxWidth: 440 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", color: "#1f2a33", borderRadius: 14, padding: 18, width: "100%", maxWidth: 440 }}>
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>{modal === "new" ? "Nuevo evento" : "Editar evento"}</div>
             <label style={{ fontSize: 12, color: "#6b7a86" }}>Título</label>
             <input style={{ ...inp, marginBottom: 10 }} value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Ej: Reunión con proveedor" />
@@ -1068,7 +1068,7 @@ function MiAgendaVista({ db, F }) {
       )}
       {info && (
         <div onClick={() => setInfo(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 18, width: "100%", maxWidth: 380 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", color: "#1f2a33", borderRadius: 14, padding: 18, width: "100%", maxWidth: 380 }}>
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>🎓 {info.titulo}</div>
             <div style={{ fontSize: 14, marginBottom: 12 }}>{new Date(info.fecha + "T12:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {info.hora} ({info.durMin} min)</div>
             <div style={{ fontSize: 12, color: "#6b7a86", marginBottom: 14 }}>Las clases se editan en Academia (ahí están los alumnos, la asistencia y los cobros).</div>
