@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { initializeApp, deleteApp } from "firebase/app";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import {
   getFirestore, collection, doc, getDoc, setDoc, addDoc, deleteDoc, updateDoc,
   onSnapshot, serverTimestamp, query, orderBy, Timestamp, getDocs, where,
@@ -27,6 +28,12 @@ const firebaseConfig = {
   appId: "1:447720199984:web:312a8a1140d95554821af5",
 };
 const app = initializeApp(firebaseConfig);
+// App Check (Fraud Defense / reCAPTCHA Enterprise): comprueba que las peticiones vienen de las webs reales de Golf B.
+// Modo vigilar: no bloquea nada hasta que se active el cumplimiento en la consola de Firebase.
+try {
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") window.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider("6LeXiBsuAAAAAODBncyVXD11bnAMYF_AaiIwvktu"), isTokenAutoRefreshEnabled: true });
+} catch (e) { console.warn("App Check:", e); }
 const db = getFirestore(app);
 const auth = getAuth(app);
 const functions = getFunctions(app);
