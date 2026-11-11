@@ -710,7 +710,14 @@ function DocumentosAdmin({ nombreOperario }) {
                 </Field>
               </div>
               <Field label="Titulo (opcional; si lo dejas vacio se pone solo)"><input className={inputCls} value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="p.ej. Nomina octubre 2026" /></Field>
-              <Field label="Archivo (PDF o imagen, maximo 700 KB)"><input id="doc-archivo" type="file" accept="application/pdf,image/*" onChange={(e) => setArchivo(e.target.files?.[0] || null)} className="text-sm" /></Field>
+              <div className="mb-3.5">
+                <span className="block text-[13px] font-medium mb-1.5" style={{ color: BLANCO_SUAVE }}>Archivo (PDF o imagen, maximo 700 KB)</span>
+                <input id="doc-archivo" type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => setArchivo(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+                <div className="flex items-center gap-3 flex-wrap">
+                  <BotonSecundario onClick={() => document.getElementById("doc-archivo").click()}>Elegir archivo</BotonSecundario>
+                  <span className="text-sm" style={{ color: BLANCO_SUAVE }}>{archivo ? archivo.name + " (" + Math.round(archivo.size / 1024) + " KB)" : "Ningun archivo elegido"}</span>
+                </div>
+              </div>
               <BotonPrimario onClick={subir} icon={null}>{subiendo ? "Subiendo..." : "Subir documento"}</BotonPrimario>
             </Tarjeta>
             <div className="flex gap-2 flex-wrap mb-4">
