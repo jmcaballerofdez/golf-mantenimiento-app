@@ -7,7 +7,7 @@ import {
 } from "firebase/firestore";
 import { getAuth, signInWithCustomToken, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import {
+import { BookOpen,
   LayoutDashboard, Users, ClipboardCheck, AlertTriangle, FlaskConical,
   Tractor, Clock, Plus, Pencil, Trash2, X, Menu,
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
@@ -1082,6 +1082,116 @@ function MiAgendaVista({ db, F }) {
     </div>
   );
 }
+// ═══════════════════════════════════════════════════════════════════
+// DIARIO (solo superadmin): diario personal compartido entre todas las apps
+// (clubes/ciudad-real/diario_personal)
+// ═══════════════════════════════════════════════════════════════════
+const DI_AREAS = ["General", "Academia", "Recepción", "Mantenimiento", "Proshop", "Finanzas", "Campo", "Reuniones", "Otros"];
+const diIso = (d) => d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+const diHoraAhora = () => { const d = new Date(); return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); };
+
+function DiarioVista({ db, F, area = "General", ink = "#f3f6f4", soft = "#c9d3cc" }) {
+  const COL = ["clubes", "ciudad-real", "diario_personal"];
+  const [entradas, setEntradas] = useState([]);
+  const [error, setError] = useState("");
+  const [fecha, setFecha] = useState(diIso(new Date()));
+  const [hora, setHora] = useState(diHoraAhora());
+  const [tipo, setTipo] = useState("laboral"); // "laboral" | "personal"
+  const [areaSel, setAreaSel] = useState(DI_AREAS.includes(area) ? area : "General");
+  const [texto, setTexto] = useState("");
+  const [editando, setEditando] = useState(null);
+  const [filtroArea, setFiltroArea] = useState("");
+  const [mes, setMes] = useState(diIso(new Date()).slice(0, 7));
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    const u = F.onSnapshot(F.collection(db, ...COL),
+      (s) => setEntradas(s.docs.map((d) => ({ ...d.data(), id: d.id }))),
+      (e) => setError("No se pudo leer el diario: " + e.message));
+    return () => u();
+  }, []);
+
+  const inp = { color: "#1f2a33", background: "#fff", border: "1.5px solid #C7D2DC", borderRadius: 8, padding: "8px 10px", fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" };
+  const btn = (bg, col) => ({ background: bg, color: col, border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" });
+  const run = async (fn) => { try { setError(""); await fn(); } catch (e) { setError("Error: " + e.message); } };
+
+  const guardar = () => run(async () => {
+    if (!texto.trim()) return;
+    const reg = { texto: texto.trim(), fecha, hora, area: tipo === "personal" ? "Personal" : areaSel, tipo };
+    if (editando) await F.updateDoc(F.doc(db, ...COL, editando), { ...reg, editadoEn: Date.now() });
+    else await F.addDoc(F.collection(db, ...COL), { ...reg, creadoEn: Date.now() });
+    setTexto(""); setEditando(null); setHora(diHoraAhora());
+  });
+  const editar = (e) => { setEditando(e.id); setTexto(e.texto); setFecha(e.fecha); setHora(e.hora || ""); setAreaSel(DI_AREAS.includes(e.area) ? e.area : "General"); setTipo(e.tipo === "personal" ? "personal" : "laboral"); window.scrollTo && window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const cancelarEdicion = () => { setEditando(null); setTexto(""); setHora(diHoraAhora()); };
+  const borrar = (e) => run(async () => { if (window.confirm("¿Eliminar esta entrada del diario?")) await F.deleteDoc(F.doc(db, ...COL, e.id)); });
+
+  const lista = entradas
+    .filter((e) => (e.tipo === "personal" ? "personal" : "laboral") === tipo)
+    .filter((e) => (!mes || (e.fecha || "").slice(0, 7) === mes) && (!filtroArea || e.area === filtroArea) && (!q.trim() || (e.texto || "").toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => ((b.fecha || "") + (b.hora || "")).localeCompare((a.fecha || "") + (a.hora || "")) || (b.creadoEn || 0) - (a.creadoEn || 0));
+  const porDia = {}; lista.forEach((e) => { (porDia[e.fecha] = porDia[e.fecha] || []).push(e); });
+  const dias = Object.keys(porDia).sort().reverse();
+  const fmtDia = (f) => { const d = new Date(f + "T12:00:00"); const s = d.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); return s.charAt(0).toUpperCase() + s.slice(1); };
+
+  function exportar() {
+    const esc = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+    const filas = [["Fecha", "Hora", "Área", "Entrada"].map(esc).join(";")];
+    lista.slice().reverse().forEach((e) => filas.push([e.fecha, e.hora, e.area, e.texto].map(esc).join(";")));
+    const blob = new Blob(["﻿" + filas.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "diario-" + tipo + "-" + (mes || "todo") + ".csv"; a.click();
+  }
+
+  return (
+    <div style={{ color: ink }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {[["laboral", "💼 Diario laboral"], ["personal", "🏡 Diario personal"]].map(([k, l]) => (
+          <button key={k} onClick={() => { setTipo(k); setEditando(null); setTexto(""); setFiltroArea(""); }}
+            style={{ ...btn(tipo === k ? "#2F6B3F" : "#E6EBF0", tipo === k ? "#fff" : "#333"), padding: "9px 16px", fontSize: 14 }}>{l}</button>
+        ))}
+      </div>
+      <div style={{ background: "#fff", color: "#1f2a33", borderRadius: 12, padding: 12, marginBottom: 14, display: "grid", gap: 8 }}>
+        <div style={{ fontWeight: 800, fontSize: 14 }}>{editando ? "✏️ Editando entrada" : "📓 Nueva entrada"}</div>
+        <textarea rows={4} style={{ ...inp, width: "100%", resize: "vertical" }} placeholder={tipo === "personal" ? "Escribe lo que quieras recordar de tu día…" : "¿Qué has hecho hoy en el club? Escríbelo como quieras…"} value={texto} onChange={(e) => setTexto(e.target.value)} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input type="date" style={inp} value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          <input type="time" style={inp} value={hora} onChange={(e) => setHora(e.target.value)} />
+          {tipo === "laboral" && <select style={inp} value={areaSel} onChange={(e) => setAreaSel(e.target.value)}>{DI_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
+          <span style={{ flex: 1 }} />
+          {editando && <button style={btn("#E6EBF0", "#333")} onClick={cancelarEdicion}>Cancelar</button>}
+          <button style={btn("#2F6B3F", "#fff")} onClick={guardar}>{editando ? "Guardar cambios" : "+ Añadir al diario"}</button>
+        </div>
+      </div>
+      {error && <div style={{ background: "#FBE4E1", color: "#C0392B", padding: 8, borderRadius: 8, fontSize: 13, marginBottom: 10 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+        <input type="month" style={inp} value={mes} onChange={(e) => setMes(e.target.value)} title="Mes" />
+        {tipo === "laboral" && <select style={inp} value={filtroArea} onChange={(e) => setFiltroArea(e.target.value)}><option value="">Todas las áreas</option>{DI_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
+        <input style={{ ...inp, flex: 1, minWidth: 140 }} placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <button style={btn("#E6EBF0", "#333")} onClick={() => setMes("")}>Ver todo</button>
+        <button style={btn("#E6EBF0", "#333")} onClick={exportar}>⬇ Excel (CSV)</button>
+      </div>
+      {dias.length === 0 && <div style={{ color: soft, fontSize: 14 }}>No hay entradas en este periodo.</div>}
+      {dias.map((f) => (
+        <div key={f} style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>{fmtDia(f)}</div>
+          {porDia[f].map((e) => (
+            <div key={e.id} style={{ background: "#fff", color: "#1f2a33", borderRadius: 10, padding: "10px 12px", marginBottom: 6, borderLeft: "4px solid #2F6B3F" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "#6b7a86", marginBottom: 4 }}>
+                <span style={{ fontWeight: 700 }}>{e.hora || ""}</span>
+                {tipo === "laboral" && <span style={{ background: "#E6EBF0", borderRadius: 10, padding: "1px 8px", fontWeight: 600 }}>{e.area || "General"}</span>}
+                <span style={{ flex: 1 }} />
+                <button onClick={() => editar(e)} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 14 }} title="Editar">✏️</button>
+                <button onClick={() => borrar(e)} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 14, color: "#9aa7b1" }} title="Eliminar">🗑</button>
+              </div>
+              <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{e.texto}</div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const MI_AGENDA_F = { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1216,6 +1326,7 @@ export default function App() {
       { id: "mis_documentos", label: "Mis documentos", Icon: Lock },
       ...(userRole === "superadmin" ? [{ id: "mi_agenda", label: "Mi agenda", Icon: Calendar }] : []),
       ...(userRole === "superadmin" ? [{ id: "mi_tareas", label: "Mis tareas", Icon: ClipboardCheck }] : []),
+      ...(userRole === "superadmin" ? [{ id: "diario", label: "Diario", Icon: BookOpen }] : []),
     ]},
     { label: "Operativa", items: [
       { id: "tareas", label: "Tareas de campo", Icon: ClipboardCheck },
@@ -1250,7 +1361,7 @@ export default function App() {
   })).filter((grupo) => grupo.items.length > 0);
 
   const TITULOS = {
-    mi_agenda: "Mi agenda", mi_tareas: "Mis tareas",
+    mi_agenda: "Mi agenda", mi_tareas: "Mis tareas", diario: "Diario",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
     maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
@@ -1374,6 +1485,7 @@ export default function App() {
           {vista === "informe_horas" && userRole === "superadmin" && <InformeHorasMant />}
           {vista === "mi_agenda" && userRole === "superadmin" && <MiAgendaVista db={db} F={MI_AGENDA_F} />}
           {vista === "mi_tareas" && userRole === "superadmin" && <MisTareasVista db={db} F={MI_AGENDA_F} />}
+          {vista === "diario" && userRole === "superadmin" && <DiarioVista db={db} F={MI_AGENDA_F} area="Mantenimiento" />}
           {vista === "ausencias" && (userRole === "jardinero" ? <MisAusencias nombreOperario={nombreOperario} /> : <Ausencias />)}
         </main>
       </div>
