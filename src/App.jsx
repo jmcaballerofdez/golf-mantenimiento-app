@@ -921,6 +921,18 @@ const maLunes = (iso) => { const d = new Date(iso + "T12:00:00"); return maSuma(
 const maMin = (h) => { const [a, b] = String(h || "0:0").split(":"); return (Number(a) || 0) * 60 + (Number(b) || 0); };
 const maHora = (m) => String(Math.floor(m / 60)).padStart(2,"0") + ":" + String(m % 60).padStart(2,"0");
 
+const maSegmentos = (e, gIni = "08:00", gFin = "21:00") => {
+  const fin = e.fechaFin && e.fechaFin >= e.fecha ? e.fechaFin : e.fecha;
+  const hf = e.horaFin || maHora(Math.min(maMin(e.hora) + (e.durMin || 60), 23 * 60 + 59));
+  const orig = { fechaOrig: e.fecha, horaOrig: e.hora };
+  if (fin === e.fecha) return [{ ...e, ...orig, durMin: e.horaFin ? Math.max(5, maMin(hf) - maMin(e.hora)) : (e.durMin || 60) }];
+  const out = [];
+  for (let d = e.fecha, n = 0; d <= fin && n < 60; d = maSuma(d, 1), n++) {
+    const a = d === e.fecha ? e.hora : gIni, b = d === fin ? hf : gFin;
+    out.push({ ...e, ...orig, fecha: d, hora: a, durMin: Math.max(15, maMin(b) - maMin(a)) });
+  }
+  return out;
+};
 function MiAgendaVista({ db, F }) {
   const [lunes, setLunes] = useState(() => maLunes(maIso(new Date())));
   const [personales, setPersonales] = useState([]);
@@ -959,7 +971,7 @@ function MiAgendaVista({ db, F }) {
     if (omit.includes("auto-" + g.id + "-" + f)) return;
     clases.push({ id: "auto-" + g.id + "-" + f, fecha: f, hora, durMin: Math.max(30, fin - ini), titulo: g.nombre || "Grupo infantil", tipo: "escuela" });
   });
-  const pers = personales.filter((e) => e.fecha >= lunes && e.fecha <= domingo);
+  const pers = personales.filter((e) => e.fecha <= domingo && (e.fechaFin || e.fecha) >= lunes).flatMap((e) => maSegmentos(e)).filter((e) => e.fecha >= lunes && e.fecha <= domingo);
 
   const ini0 = 8 * 60, fin0 = 21 * 60;
   const alto = ((fin0 - ini0) / 30) * MA_H;
@@ -973,11 +985,14 @@ function MiAgendaVista({ db, F }) {
     return res;
   }
 
-  function nuevo(fecha, hora) { setForm({ fecha, hora, durMin: 60, titulo: "", nota: "" }); setModal("new"); setError(""); }
-  function editar(e) { setForm({ fecha: e.fecha, hora: e.hora, durMin: e.durMin || 60, titulo: e.titulo || "", nota: e.nota || "" }); setModal(e.id); setError(""); }
+  function nuevo(fecha, hora) { setForm({ fecha, hora, fechaFin: fecha, horaFin: maHora(Math.min(maMin(hora) + 60, 23 * 60 + 59)), titulo: "", nota: "" }); setModal("new"); setError(""); }
+  function editar(e) { const f0 = e.fechaOrig || e.fecha, h0 = e.horaOrig || e.hora; setForm({ fecha: f0, hora: h0, fechaFin: e.fechaFin || f0, horaFin: e.horaFin || maHora(Math.min(maMin(h0) + (e.durMin || 60), 23 * 60 + 59)), titulo: e.titulo || "", nota: e.nota || "" }); setModal(e.id); setError(""); }
   async function guardar() {
     if (!form.fecha || !form.hora) return;
-    const reg = { titulo: (form.titulo || "").trim() || "Reunión", fecha: form.fecha, hora: form.hora, durMin: Math.max(5, Number(form.durMin) || 60), nota: (form.nota || "").trim() };
+    const fFin = form.fechaFin || form.fecha, hFin = form.horaFin || maHora(Math.min(maMin(form.hora) + 60, 23 * 60 + 59));
+    const durTotal = Math.round((new Date(fFin + "T00:00:00") - new Date(form.fecha + "T00:00:00")) / 864e5) * 1440 + maMin(hFin) - maMin(form.hora);
+    if (durTotal < 5) { setError("El final debe ser posterior al inicio."); return; }
+    const reg = { titulo: (form.titulo || "").trim() || "Reunión", fecha: form.fecha, hora: form.hora, fechaFin: fFin, horaFin: hFin, durMin: durTotal, nota: (form.nota || "").trim() };
     try {
       if (modal === "new") await F.addDoc(F.collection(db, "clubes", "ciudad-real", "agenda_personal"), { ...reg, creadoEn: Date.now() });
       else await F.updateDoc(F.doc(db, "clubes", "ciudad-real", "agenda_personal", modal), reg);
@@ -1051,10 +1066,11 @@ function MiAgendaVista({ db, F }) {
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 12 }}>{modal === "new" ? "Nuevo evento" : "Editar evento"}</div>
             <label style={{ fontSize: 12, color: "#6b7a86" }}>Título</label>
             <input style={{ ...inp, marginBottom: 10 }} value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Ej: Reunión con proveedor" />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Fecha</label><input type="date" style={inp} value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} /></div>
-              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Hora</label><input type="time" style={inp} value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></div>
-              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Duración (min)</label><input type="number" style={inp} value={form.durMin} onChange={(e) => setForm({ ...form, durMin: e.target.value })} /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Fecha inicio</label><input type="date" style={inp} value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value, fechaFin: form.fechaFin < e.target.value ? e.target.value : form.fechaFin })} /></div>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Hora inicio</label><input type="time" style={inp} value={form.hora} onChange={(e) => setForm({ ...form, hora: e.target.value })} /></div>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Fecha final</label><input type="date" style={inp} min={form.fecha} value={form.fechaFin || form.fecha} onChange={(e) => setForm({ ...form, fechaFin: e.target.value })} /></div>
+              <div><label style={{ fontSize: 12, color: "#6b7a86" }}>Hora final</label><input type="time" style={inp} value={form.horaFin || ""} onChange={(e) => setForm({ ...form, horaFin: e.target.value })} /></div>
             </div>
             <label style={{ fontSize: 12, color: "#6b7a86" }}>Nota</label>
             <textarea rows={2} style={{ ...inp, marginBottom: 12 }} value={form.nota} onChange={(e) => setForm({ ...form, nota: e.target.value })} />
