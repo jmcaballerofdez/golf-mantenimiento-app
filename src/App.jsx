@@ -2251,16 +2251,40 @@ function ModalConfigCategoriasTarea({ open, onClose, categorias, onGuardar }) {
     </Modal>
   );
 }
+// Cierre automático de tareas olvidadas: entre semana a las 13:45 (jornada 6-14 h), fin de semana a las 9:45 (jornada 6-10 h)
+const AUTOCIERRE_YA = new Set();
+function finAutomatico(inicio) {
+  const ini = inicio?.toDate ? inicio.toDate() : new Date(inicio);
+  if (isNaN(ini)) return null;
+  const finde = ini.getDay() === 0 || ini.getDay() === 6;
+  const mk = (h, m) => { const d = new Date(ini); d.setHours(h, m, 0, 0); return d; };
+  const corte = finde ? mk(9, 45) : mk(13, 45);
+  const finJornada = finde ? mk(10, 0) : mk(14, 0);
+  if (ini < corte) return corte;       // se cierra 15 min antes de acabar la jornada
+  if (ini < finJornada) return finJornada; // empezó en los últimos 15 min: cierra a fin de jornada
+  return ini;                           // empezó fuera de jornada: sin duración
+}
+
 // Panel "Equipo ahora": quién está haciendo qué, en tiempo real (visible para responsables)
 function PanelEquipoAhora({ registros }) {
   const [, setTick] = useState(0);
+  const [cerrando, setCerrando] = useState(null); // {id, valor}
+  const isoLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") + "T" + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  async function cerrarTarea(r) {
+    const fin = new Date(cerrando.valor);
+    const ini = r.inicio?.toDate ? r.inicio.toDate() : new Date(r.inicio);
+    if (isNaN(fin)) { alert("Pon día y hora de fin."); return; }
+    if (fin < ini) { alert("El fin no puede ser anterior al inicio."); return; }
+    await actualizarDoc("mant_registro_trabajo", r.id, { fin, cerradaManual: true });
+    setCerrando(null);
+  }
   useEffect(() => { const i = setInterval(() => setTick((n) => n + 1), 15000); return () => clearInterval(i); }, []);
   const ms = (ts) => (ts?.toDate ? ts.toDate().getTime() : ts ? new Date(ts).getTime() : 0);
   const fmtDur = (m) => { const min = Math.max(0, Math.round(m / 60000)); return min < 60 ? min + " min" : Math.floor(min / 60) + " h " + String(min % 60).padStart(2, "0") + " min"; };
   const fmtDia = (ts) => { const d = ts?.toDate ? ts.toDate() : new Date(ts); return d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" }); };
   const hoyStr = new Date().toDateString();
   const ahora = Date.now();
-  const enCurso = registros.filter((r) => !r.fin && r.inicio).sort((a, b) => ms(a.inicio) - ms(b.inicio));
+  const enCurso = registros.filter((r) => !r.fin && r.inicio && ahora < (finAutomatico(r.inicio)?.getTime() || 0)).sort((a, b) => ms(a.inicio) - ms(b.inicio));
   const hoyFin = registros.filter((r) => r.fin && r.inicio && (r.inicio?.toDate ? r.inicio.toDate() : new Date(r.inicio)).toDateString() === hoyStr).sort((a, b) => ms(b.fin) - ms(a.fin));
   return (
     <div className="mb-6">
@@ -2274,12 +2298,22 @@ function PanelEquipoAhora({ registros }) {
                 <p className="font-semibold" style={{ color: BLANCO }}>{r.operarioNombre || "Operario"}</p>
                 <p className="text-sm" style={{ color: BLANCO }}>{r.tipoTareaNombre}{r.maquinaNombre ? " · " + r.maquinaNombre : ""}</p>
                 <p className="text-xs text-stone-400">Empezó el {fmtDia(r.inicio)} a las {horaCorta(r.inicio)}</p>
+                {ahora - ms(r.inicio) > 12 * 3600000 && <p className="text-xs mt-1" style={{ color: "#E2685C" }}>⚠ Lleva más de 12 h abierta: seguramente se olvidó de finalizarla.</p>}
               </div>
               <div className="text-right">
-                <p className="text-lg font-semibold" style={{ color: DORADO }}>{fmtDur(ahora - ms(r.inicio))}</p>
+                <p className="text-lg font-semibold" style={{ color: ahora - ms(r.inicio) > 12 * 3600000 ? "#E2685C" : DORADO }}>{fmtDur(ahora - ms(r.inicio))}</p>
                 <p className="text-xs text-stone-400">en curso</p>
+                <button onClick={() => setCerrando({ id: r.id, valor: isoLocal(new Date()) })} className="text-xs underline mt-1" style={{ color: DORADO }}>Cerrar tarea…</button>
               </div>
             </div>
+            {cerrando && cerrando.id === r.id && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-stone-400">Terminó el:</span>
+                <input type="datetime-local" className={inputCls} style={{ width: "auto" }} value={cerrando.valor} onChange={(e) => setCerrando({ id: r.id, valor: e.target.value })} />
+                <BotonPrimario onClick={() => cerrarTarea(r)} icon={null}>Guardar fin</BotonPrimario>
+                <button onClick={() => setCerrando(null)} className="text-xs text-stone-400 underline">cancelar</button>
+              </div>
+            )}
           </Tarjeta>
         ))}
       </div>
@@ -2290,7 +2324,7 @@ function PanelEquipoAhora({ registros }) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-medium" style={{ color: BLANCO }}>{r.operarioNombre || "Operario"} · {r.tipoTareaNombre}{r.maquinaNombre ? " · " + r.maquinaNombre : ""}</p>
-                <p className="text-xs text-stone-400">{fmtDia(r.inicio)} · {horaCorta(r.inicio)} → {horaCorta(r.fin)}</p>
+                <p className="text-xs text-stone-400">{fmtDia(r.inicio)} · {horaCorta(r.inicio)} → {horaCorta(r.fin)}{r.cerradaAuto ? " · cierre automático" : r.cerradaManual ? " · cerrada a mano" : ""}</p>
               </div>
               <p className="text-sm font-semibold text-stone-300">{fmtDur(ms(r.fin) - ms(r.inicio))}</p>
             </div>
@@ -2306,6 +2340,20 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
   const { datos: tipos } = useColeccion("mant_tipos_tarea", "nombre", "asc");
   const { datos: maquinas } = useColeccion("mant_maquinaria", "nombre", "asc");
   const { datos: registros } = useColeccion("mant_registro_trabajo", "inicio", "desc");
+
+  const [, setTickAC] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTickAC((n) => n + 1), 60000); return () => clearInterval(i); }, []);
+  useEffect(() => {
+    const ahoraMs = Date.now();
+    registros.forEach((r) => {
+      if (r.fin || !r.inicio || AUTOCIERRE_YA.has(r.id)) return;
+      if (userRole === "jardinero" && r.operarioUid !== usuario?.uid) return;
+      const fa = finAutomatico(r.inicio);
+      if (!fa || ahoraMs < fa.getTime()) return;
+      AUTOCIERRE_YA.add(r.id);
+      actualizarDoc("mant_registro_trabajo", r.id, { fin: fa, cerradaAuto: true }).catch(() => AUTOCIERRE_YA.delete(r.id));
+    });
+  }, [registros, userRole, usuario?.uid]);
 
   const misRegistros = registros.filter((r) => r.operarioUid === usuario?.uid);
   const enCurso = misRegistros.find((r) => !r.fin);
@@ -2396,7 +2444,7 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
                   )}
               <p className="text-xs text-stone-500">
                 {r.maquinaNombre ? `${r.maquinaNombre} · ` : ""}{duracion(r)}
-                {r.litrosCombustible ? ` · ${r.litrosCombustible} L` : ""}
+                {r.litrosCombustible ? ` · ${r.litrosCombustible} L` : ""}{r.cerradaAuto ? " · cierre automático" : ""}
               </p>
             </div>
           </Tarjeta>
