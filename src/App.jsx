@@ -902,8 +902,8 @@ function InformeHorasMant() {
     if (!r.inicio?.toDate) return;
     if (!r.fin?.toDate) { pendientes.push({ fecha: isoLocalInf(r.inicio.toDate()), persona: r.operarioNombre || "Sin nombre" }); return; }
     const a = r.inicio.toDate(), b = r.fin.toDate();
-    const min = Math.round((b - a) / 60000);
-    if (min < 0) return;
+    const min = minutosEfectivos(a, b);
+    if (b < a) return;
     filas.push({ fecha: isoLocalInf(a), tarea: r.tipoTareaNombre || "Sin tipo", persona: r.operarioNombre || "Sin nombre", minutos: min, inicio: hh(a), fin: hh(b) });
   });
   return <InformeHorasVista titulo="Informe de horas por tarea" subtitulo="Tiempo dedicado a cada tarea registrada por el equipo de Mantenimiento." filas={filas} pendientes={pendientes} nombreArchivo="horas_mantenimiento" />;
@@ -2251,6 +2251,21 @@ function ModalConfigCategoriasTarea({ open, onClose, categorias, onGuardar }) {
     </Modal>
   );
 }
+// Descuento del almuerzo (10:00-10:20) en el tiempo trabajado de cada tarea
+function msEfectivos(aMs, bMs) {
+  if (!(bMs > aMs)) return 0;
+  let desc = 0;
+  const d = new Date(aMs); d.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 90 && d.getTime() <= bMs; i++) {
+    const s = new Date(d); s.setHours(10, 0, 0, 0);
+    const e = new Date(d); e.setHours(10, 20, 0, 0);
+    desc += Math.max(0, Math.min(bMs, e.getTime()) - Math.max(aMs, s.getTime()));
+    d.setDate(d.getDate() + 1);
+  }
+  return Math.max(0, bMs - aMs - desc);
+}
+const minutosEfectivos = (a, b) => Math.round(msEfectivos(a.getTime(), b.getTime()) / 60000);
+
 // Cierre automático de tareas olvidadas: entre semana a las 13:45 (jornada 6-14 h), fin de semana a las 9:45 (jornada 6-10 h)
 const AUTOCIERRE_YA = new Set();
 function finAutomatico(inicio) {
@@ -2301,7 +2316,7 @@ function PanelEquipoAhora({ registros }) {
                 {ahora - ms(r.inicio) > 12 * 3600000 && <p className="text-xs mt-1" style={{ color: "#E2685C" }}>⚠ Lleva más de 12 h abierta: seguramente se olvidó de finalizarla.</p>}
               </div>
               <div className="text-right">
-                <p className="text-lg font-semibold" style={{ color: ahora - ms(r.inicio) > 12 * 3600000 ? "#E2685C" : DORADO }}>{fmtDur(ahora - ms(r.inicio))}</p>
+                <p className="text-lg font-semibold" style={{ color: ahora - ms(r.inicio) > 12 * 3600000 ? "#E2685C" : DORADO }}>{fmtDur(msEfectivos(ms(r.inicio), ahora))}</p>
                 <p className="text-xs text-stone-400">en curso</p>
                 <button onClick={() => setCerrando({ id: r.id, valor: isoLocal(new Date()) })} className="text-xs underline mt-1" style={{ color: DORADO }}>Cerrar tarea…</button>
               </div>
@@ -2326,7 +2341,7 @@ function PanelEquipoAhora({ registros }) {
                 <p className="text-sm font-medium" style={{ color: BLANCO }}>{r.operarioNombre || "Operario"} · {r.tipoTareaNombre}{r.maquinaNombre ? " · " + r.maquinaNombre : ""}</p>
                 <p className="text-xs text-stone-400">{fmtDia(r.inicio)} · {horaCorta(r.inicio)} → {horaCorta(r.fin)}{r.cerradaAuto ? " · cierre automático" : r.cerradaManual ? " · cerrada a mano" : ""}</p>
               </div>
-              <p className="text-sm font-semibold text-stone-300">{fmtDur(ms(r.fin) - ms(r.inicio))}</p>
+              <p className="text-sm font-semibold text-stone-300">{fmtDur(msEfectivos(ms(r.inicio), ms(r.fin)))}</p>
             </div>
           </Tarjeta>
         ))}
@@ -2404,8 +2419,7 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
 
   function duracion(r) {
     if (!r.inicio?.toDate || !r.fin?.toDate) return "-";
-    const ms = r.fin.toDate() - r.inicio.toDate();
-    const min = Math.round(ms / 60000);
+    const min = minutosEfectivos(r.inicio.toDate(), r.fin.toDate());
     if (min < 60) return `${min} min`;
     return `${Math.floor(min / 60)}h ${min % 60}min`;
   }
@@ -2505,7 +2519,7 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
 
     function minutosDe(r) {
       if (!r.inicio?.toDate || !r.fin?.toDate) return null;
-      return Math.round((r.fin.toDate() - r.inicio.toDate()) / 60000);
+      return minutosEfectivos(r.inicio.toDate(), r.fin.toDate());
     }
 
     const completados = registros.filter((r) => {
