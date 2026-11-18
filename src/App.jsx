@@ -2504,91 +2504,137 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
   }
 
   function ModalInformesRegistroTrabajo({ open, onClose }) {
-    const { datos: equipo } = useColeccion("mant_equipo", "nombre", "asc");
-    const { datos: tipos } = useColeccion("mant_tipos_tarea", "nombre", "asc");
     const { datos: registros } = useColeccion("mant_registro_trabajo", "inicio", "desc");
-
-    const hoy = new Date().toISOString().slice(0, 10);
-    const hace30 = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    const [desde, setDesde] = useState(hace30);
+    const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const hoyD = new Date();
+    const hoy = iso(hoyD);
+    const [desde, setDesde] = useState(iso(new Date(hoyD.getFullYear(), hoyD.getMonth(), 1)));
     const [hasta, setHasta] = useState(hoy);
+    const [filtroOp, setFiltroOp] = useState("");
+    const [filtroTarea, setFiltroTarea] = useState("");
+    const [verDetalle, setVerDetalle] = useState(false);
+    const preset = (k) => {
+      const y = hoyD.getFullYear(), m = hoyD.getMonth();
+      if (k === "mes") { setDesde(iso(new Date(y, m, 1))); setHasta(hoy); }
+      if (k === "mesant") { setDesde(iso(new Date(y, m - 1, 1))); setHasta(iso(new Date(y, m, 0))); }
+      if (k === "trim") { setDesde(iso(new Date(y, m - 2, 1))); setHasta(hoy); }
+      if (k === "anio") { setDesde(y + "-01-01"); setHasta(hoy); }
+      if (k === "todo") { setDesde("2000-01-01"); setHasta(hoy); }
+    };
+    const filas = registros.filter((r) => r.inicio?.toDate && r.fin?.toDate).map((r) => {
+      const a = r.inicio.toDate(), b = r.fin.toDate();
+      return { id: r.id, fecha: iso(a), a, b, min: minutosEfectivos(a, b), op: r.operarioNombre || "Sin nombre", tarea: r.tipoTareaNombre || "Sin tipo", maq: r.maquinaNombre || "", litros: Number(r.litrosCombustible) || 0, notas: r.notas || "", auto: !!r.cerradaAuto };
+    }).filter((f) => f.fecha >= desde && f.fecha <= hasta && (!filtroOp || f.op === filtroOp) && (!filtroTarea || f.tarea === filtroTarea))
+      .sort((x, y) => x.a - y.a);
+    const todosOps = [...new Set(registros.map((r) => r.operarioNombre || "Sin nombre"))].sort((a, b) => a.localeCompare(b, "es"));
+    const todasTareas = [...new Set(registros.map((r) => r.tipoTareaNombre || "Sin tipo"))].sort((a, b) => a.localeCompare(b, "es"));
+    const total = filas.reduce((s, f) => s + f.min, 0);
+    const agrupa = (key) => { const m = {}; filas.forEach((f) => { const k = f[key]; (m[k] = m[k] || { nombre: k, min: 0, n: 0, dias: new Set() }); m[k].min += f.min; m[k].n++; m[k].dias.add(f.fecha); }); return Object.values(m).sort((a, b) => b.min - a.min); };
+    const porTarea = agrupa("tarea"), porOp = agrupa("op");
+    const ops = porOp.map((o) => o.nombre);
+    const matriz = porTarea.map((t) => ({ tarea: t.nombre, celdas: ops.map((o) => filas.filter((f) => f.tarea === t.nombre && f.op === o).reduce((s, f) => s + f.min, 0)), total: t.min }));
+    const fmt = (min) => { const h = Math.floor(min / 60), m = min % 60; return h ? h + " h " + String(m).padStart(2, "0") + " min" : m + " min"; };
+    const hdec = (min) => (min / 60).toFixed(2).replace(".", ",");
+    const pct = (min) => total ? Math.round(min * 100 / total) + " %" : "—";
+    const fLeg = (f) => new Date(f + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const hh = (d) => d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
 
-    function fechaDe(r) {
-      return r.inicio?.toDate ? r.inicio.toDate().toISOString().slice(0, 10) : null;
+    function documento() {
+      const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const filtrosTxt = [filtroOp && "Operario: " + filtroOp, filtroTarea && "Tarea: " + filtroTarea].filter(Boolean).join(" · ") || "Todos los operarios y tareas";
+      const barra = (min) => '<div class="bar"><span style="width:' + (total ? Math.max(2, min * 100 / total) : 0) + '%"></span></div>';
+      const tabla = (titulo, filasT) => '<h2>' + titulo + '</h2><table><thead><tr><th>Concepto</th><th class="n">Veces</th><th class="n">Días</th><th class="n">Horas</th><th class="n">%</th><th style="width:28%"></th></tr></thead><tbody>' +
+        filasT.map((x) => '<tr><td>' + esc(x.nombre) + '</td><td class="n">' + x.n + '</td><td class="n">' + x.dias.size + '</td><td class="n"><b>' + fmt(x.min) + '</b></td><td class="n">' + pct(x.min) + '</td><td>' + barra(x.min) + '</td></tr>').join("") +
+        '<tr class="tot"><td>Total</td><td class="n">' + filas.length + '</td><td class="n">' + new Set(filas.map((f) => f.fecha)).size + '</td><td class="n">' + fmt(total) + '</td><td class="n">100 %</td><td></td></tr></tbody></table>';
+      const mat = '<h2>Horas por tarea y operario</h2><table class="mat"><thead><tr><th>Tarea</th>' + ops.map((o) => '<th class="n">' + esc(o) + '</th>').join("") + '<th class="n">Total</th></tr></thead><tbody>' +
+        matriz.map((r) => '<tr><td>' + esc(r.tarea) + '</td>' + r.celdas.map((c) => '<td class="n">' + (c ? hdec(c) : "·") + '</td>').join("") + '<td class="n"><b>' + hdec(r.total) + '</b></td></tr>').join("") +
+        '<tr class="tot"><td>Total</td>' + porOp.map((o) => '<td class="n">' + hdec(o.min) + '</td>').join("") + '<td class="n">' + hdec(total) + '</td></tr></tbody></table><p class="nota">Horas en formato decimal (1,50 = 1 h 30 min).</p>';
+      const det = '<h2 class="salto">Detalle de registros</h2><table class="det"><thead><tr><th>Fecha</th><th>Operario</th><th>Tarea</th><th>Máquina</th><th class="n">Inicio</th><th class="n">Fin</th><th class="n">Tiempo</th><th>Notas</th></tr></thead><tbody>' +
+        filas.map((f) => '<tr><td>' + fLeg(f.fecha) + '</td><td>' + esc(f.op) + '</td><td>' + esc(f.tarea) + '</td><td>' + esc(f.maq) + '</td><td class="n">' + hh(f.a) + '</td><td class="n">' + hh(f.b) + (f.auto ? ' *' : '') + '</td><td class="n">' + fmt(f.min) + '</td><td>' + esc(f.notas) + '</td></tr>').join("") +
+        '</tbody></table><p class="nota">Tiempos con el almuerzo (10:00–10:20) descontado. * Cierre automático al final de la jornada.</p>';
+      const html = '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Informe de horas · Mantenimiento</title><style>' +
+        '@page{size:A4;margin:16mm 14mm}body{font-family:Georgia,"Times New Roman",serif;color:#1d2a20;margin:0;padding:24px;font-size:12px}' +
+        '.cab{border-bottom:3px solid #0A3A15;padding-bottom:10px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-end}' +
+        '.cab h1{font-size:24px;margin:0;color:#0A3A15}.cab .sub{color:#A9743C;letter-spacing:2px;font-size:10px;text-transform:uppercase;font-family:Arial,sans-serif}' +
+        '.meta{text-align:right;font-family:Arial,sans-serif;font-size:11px;color:#555}' +
+        '.kpis{display:flex;gap:10px;margin:14px 0 6px}.kpi{flex:1;border:1px solid #d9d2c3;border-radius:8px;padding:10px;text-align:center;background:#faf7f0}.kpi b{display:block;font-size:20px;color:#0A3A15}.kpi span{font-family:Arial,sans-serif;font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px}' +
+        'h2{font-size:15px;color:#0A3A15;margin:22px 0 8px;border-left:4px solid #A9743C;padding-left:8px}' +
+        'table{width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px}th{background:#0A3A15;color:#fff;text-align:left;padding:6px 7px;font-weight:600}td{padding:5px 7px;border-bottom:1px solid #e6e0d3}tbody tr:nth-child(even) td{background:#faf7f0}' +
+        '.n{text-align:right;white-space:nowrap}.tot td{font-weight:700;border-top:2px solid #0A3A15;background:#efe9db !important}' +
+        '.bar{background:#ece6d8;border-radius:4px;height:9px}.bar span{display:block;height:9px;border-radius:4px;background:#A9743C}' +
+        '.det td{font-size:10px}.nota{font-family:Arial,sans-serif;font-size:10px;color:#777;margin-top:5px}.salto{page-break-before:always}' +
+        '.pie{margin-top:24px;font-family:Arial,sans-serif;font-size:10px;color:#888;border-top:1px solid #ddd;padding-top:6px}' +
+        '.btn{position:fixed;top:12px;right:12px;background:#0A3A15;color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer}@media print{.btn{display:none}body{padding:0}}' +
+        'tr{page-break-inside:avoid}thead{display:table-header-group}</style></head><body>' +
+        '<button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button>' +
+        '<div class="cab"><div><div class="sub">Golf Ciudad Real C.D. · Mantenimiento</div><h1>Informe de horas de trabajo</h1></div><div class="meta">Periodo: <b>' + fLeg(desde === "2000-01-01" ? (filas[0]?.fecha || hoy) : desde) + ' – ' + fLeg(hasta) + '</b><br>' + esc(filtrosTxt) + '<br>Generado el ' + new Date().toLocaleString("es-ES") + '</div></div>' +
+        '<div class="kpis"><div class="kpi"><b>' + fmt(total) + '</b><span>Horas totales</span></div><div class="kpi"><b>' + filas.length + '</b><span>Registros</span></div><div class="kpi"><b>' + new Set(filas.map((f) => f.fecha)).size + '</b><span>Días trabajados</span></div><div class="kpi"><b>' + porOp.length + '</b><span>Operarios</span></div></div>' +
+        tabla("Horas por tarea", porTarea) + tabla("Horas por operario", porOp) + mat + det +
+        '<div class="pie">Golf B · Informe generado desde la app de Mantenimiento</div></body></html>';
+      const w = window.open("", "_blank");
+      if (!w) { alert("El navegador ha bloqueado la ventana. Permite las ventanas emergentes para mantenimiento.golfb.es."); return; }
+      w.document.open(); w.document.write(html); w.document.close();
+    }
+    function excel() {
+      const c = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+      const l = [["Fecha", "Operario", "Tarea", "Máquina", "Inicio", "Fin", "Minutos", "Horas", "Litros", "Notas"].map(c).join(";")];
+      filas.forEach((f) => l.push([fLeg(f.fecha), f.op, f.tarea, f.maq, hh(f.a), hh(f.b), f.min, hdec(f.min), f.litros || "", f.notas].map(c).join(";")));
+      const blob = new Blob(["﻿" + l.join("\r\n")], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "horas_mantenimiento_" + desde + "_" + hasta + ".csv"; a.click();
     }
 
-    function minutosDe(r) {
-      if (!r.inicio?.toDate || !r.fin?.toDate) return null;
-      return minutosEfectivos(r.inicio.toDate(), r.fin.toDate());
-    }
-
-    const completados = registros.filter((r) => {
-      const f = fechaDe(r);
-      return f && f >= desde && f <= hasta && r.fin;
-    });
-
-    function resumenPorOperario() {
-      return equipo.map((op) => {
-        const suyos = completados.filter((r) => r.operarioUid === op.id || r.operarioNombre === op.nombre);
-        const minutos = suyos.map(minutosDe).filter((m) => m != null);
-        const total = minutos.reduce((s, m) => s + m, 0);
-        const media = minutos.length ? Math.round(total / minutos.length) : 0;
-        return { nombre: op.nombre, cantidad: suyos.length, total, media };
-      }).filter((r) => r.cantidad > 0);
-    }
-
-    function resumenPorTipo() {
-      return tipos.map((t) => {
-        const suyos = completados.filter((r) => r.tipoTareaId === t.id);
-        const minutos = suyos.map(minutosDe).filter((m) => m != null);
-        const total = minutos.reduce((s, m) => s + m, 0);
-        const media = minutos.length ? Math.round(total / minutos.length) : 0;
-        const estimada = t.duracionEstimada ? Number(t.duracionEstimada) : null;
-        const exceso = estimada ? media - estimada : null;
-        return { nombre: t.nombre, cantidad: suyos.length, media, estimada, exceso };
-      }).filter((r) => r.cantidad > 0);
-    }
-
-    function fmt(min) {
-      if (min < 60) return `${min} min`;
-      return `${Math.floor(min / 60)}h ${min % 60}min`;
-    }
+    const chip = (k, t) => <button key={k} onClick={() => preset(k)} className="text-xs px-3 py-1 rounded-full border" style={{ borderColor: DORADO, color: BLANCO }}>{t}</button>;
+    const bloque = (titulo, lista) => (
+      <div className="mb-5">
+        <p className="text-sm font-semibold mb-2" style={{ color: BLANCO }}>{titulo}</p>
+        {lista.length === 0 && <p className="text-xs text-stone-500">Sin datos en este periodo.</p>}
+        <div className="space-y-1.5">
+          {lista.map((r) => (
+            <div key={r.nombre} className="p-2 rounded" style={{ background: "rgba(255,255,255,0.04)" }}>
+              <div className="flex items-center justify-between text-sm">
+                <span style={{ color: BLANCO }}>{r.nombre}</span>
+                <span className="text-xs text-stone-300"><b style={{ color: DORADO }}>{fmt(r.min)}</b> · {pct(r.min)} · {r.n} {r.n === 1 ? "vez" : "veces"} · {r.dias.size} {r.dias.size === 1 ? "día" : "días"}</span>
+              </div>
+              <div className="mt-1 h-1.5 rounded" style={{ background: "rgba(255,255,255,0.08)" }}><div className="h-1.5 rounded" style={{ width: (total ? r.min * 100 / total : 0) + "%", background: DORADO }} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
 
     return (
-      <Modal open={open} onClose={onClose} title="Informes de registro de trabajo" wide>
-        <div className="grid sm:grid-cols-2 gap-x-4 mb-4">
+      <Modal open={open} onClose={onClose} title="Informe de horas acumuladas" wide>
+        <div className="flex flex-wrap gap-2 mb-3">{chip("mes", "Este mes")}{chip("mesant", "Mes anterior")}{chip("trim", "Últimos 3 meses")}{chip("anio", "Este año")}{chip("todo", "Todo")}</div>
+        <div className="grid sm:grid-cols-2 gap-x-4">
           <Field label="Desde"><input type="date" className={inputCls} value={desde} onChange={(e) => setDesde(e.target.value)} /></Field>
           <Field label="Hasta"><input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field>
+          <Field label="Operario"><select className={inputCls} value={filtroOp} onChange={(e) => setFiltroOp(e.target.value)}><option value="">Todos</option>{todosOps.map((o) => <option key={o}>{o}</option>)}</select></Field>
+          <Field label="Tarea"><select className={inputCls} value={filtroTarea} onChange={(e) => setFiltroTarea(e.target.value)}><option value="">Todas</option>{todasTareas.map((o) => <option key={o}>{o}</option>)}</select></Field>
         </div>
-
-        <p className="text-sm font-semibold mb-2" style={{ color: BLANCO }}>Por operario</p>
-        <div className="space-y-1.5 mb-5">
-          {resumenPorOperario().length === 0 && <p className="text-xs text-stone-500">Sin datos en este periodo.</p>}
-          {resumenPorOperario().map((r) => (
-            <div key={r.nombre} className="flex items-center justify-between text-sm p-2 rounded" style={{ background: "rgba(255,255,255,0.03)" }}>
-              <span style={{ color: BLANCO }}>{r.nombre}</span>
-              <span className="text-xs text-stone-400">{r.cantidad} tareas - {fmt(r.total)} total - media {fmt(r.media)}</span>
-            </div>
-          ))}
+        <div className="flex flex-wrap items-center gap-3 my-4 p-3 rounded" style={{ background: "rgba(169,116,60,0.12)", border: "1px solid " + DORADO }}>
+          <div><p className="text-xs text-stone-400">Horas totales</p><p className="text-xl font-semibold" style={{ color: DORADO }}>{fmt(total)}</p></div>
+          <div className="text-xs text-stone-300">{filas.length} registros · {new Set(filas.map((f) => f.fecha)).size} días · {porOp.length} operarios</div>
+          <span className="flex-1" />
+          <BotonPrimario onClick={documento} icon={null}>📄 Documento (PDF)</BotonPrimario>
+          <BotonSecundario onClick={excel}>Excel (CSV)</BotonSecundario>
         </div>
-
-        <p className="text-sm font-semibold mb-2" style={{ color: BLANCO }}>Por tipo de tarea</p>
-        <div className="space-y-1.5">
-          {resumenPorTipo().length === 0 && <p className="text-xs text-stone-500">Sin datos en este periodo.</p>}
-          {resumenPorTipo().map((r) => (
-            <div key={r.nombre} className="flex items-center justify-between text-sm p-2 rounded" style={{ background: "rgba(255,255,255,0.03)" }}>
-              <span style={{ color: BLANCO }}>{r.nombre}</span>
-              <span className="text-xs text-stone-400">
-                {r.cantidad} veces - media {fmt(r.media)}
-                {r.estimada != null && (
-                  r.exceso > 5 ? <span className="text-red-400"> - +{r.exceso}min sobre estimado</span> :
-                  r.exceso < -5 ? <span className="text-emerald-400"> - {r.exceso}min bajo estimado</span> :
-                  <span> - dentro de lo estimado</span>
-                )}
-              </span>
-            </div>
-          ))}
-        </div>
+        {bloque("Por tarea", porTarea)}
+        {bloque("Por operario", porOp)}
+        {matriz.length > 0 && ops.length > 1 && (
+          <div className="mb-5 overflow-x-auto">
+            <p className="text-sm font-semibold mb-2" style={{ color: BLANCO }}>Tarea × operario (horas)</p>
+            <table className="text-xs w-full" style={{ color: BLANCO }}>
+              <thead><tr><th className="text-left p-1">Tarea</th>{ops.map((o) => <th key={o} className="text-right p-1">{o.split(" ")[0]}</th>)}<th className="text-right p-1">Total</th></tr></thead>
+              <tbody>{matriz.map((r) => <tr key={r.tarea} style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}><td className="p-1">{r.tarea}</td>{r.celdas.map((c, i) => <td key={i} className="text-right p-1 text-stone-300">{c ? hdec(c) : "·"}</td>)}<td className="text-right p-1" style={{ color: DORADO }}>{hdec(r.total)}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        <button onClick={() => setVerDetalle(!verDetalle)} className="text-xs underline mb-2" style={{ color: DORADO }}>{verDetalle ? "Ocultar" : "Ver"} detalle de registros ({filas.length})</button>
+        {verDetalle && <div className="space-y-1">{filas.slice().reverse().map((f) => (
+          <div key={f.id} className="flex justify-between text-xs p-1.5 rounded" style={{ background: "rgba(255,255,255,0.03)", color: BLANCO }}>
+            <span>{fLeg(f.fecha)} · {f.op} · {f.tarea}{f.maq ? " · " + f.maq : ""}</span><span className="text-stone-400">{hh(f.a)}–{hh(f.b)} · {fmt(f.min)}</span>
+          </div>))}</div>}
+        <p className="text-xs text-stone-500 mt-3">Tiempos con el almuerzo (10:00–10:20) descontado.</p>
       </Modal>
     );
   }
