@@ -2251,6 +2251,56 @@ function ModalConfigCategoriasTarea({ open, onClose, categorias, onGuardar }) {
     </Modal>
   );
 }
+// Panel "Equipo ahora": quién está haciendo qué, en tiempo real (visible para responsables)
+function PanelEquipoAhora({ registros }) {
+  const [, setTick] = useState(0);
+  useEffect(() => { const i = setInterval(() => setTick((n) => n + 1), 15000); return () => clearInterval(i); }, []);
+  const ms = (ts) => (ts?.toDate ? ts.toDate().getTime() : ts ? new Date(ts).getTime() : 0);
+  const fmtDur = (m) => { const min = Math.max(0, Math.round(m / 60000)); return min < 60 ? min + " min" : Math.floor(min / 60) + " h " + String(min % 60).padStart(2, "0") + " min"; };
+  const fmtDia = (ts) => { const d = ts?.toDate ? ts.toDate() : new Date(ts); return d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" }); };
+  const hoyStr = new Date().toDateString();
+  const ahora = Date.now();
+  const enCurso = registros.filter((r) => !r.fin && r.inicio).sort((a, b) => ms(a.inicio) - ms(b.inicio));
+  const hoyFin = registros.filter((r) => r.fin && r.inicio && (r.inicio?.toDate ? r.inicio.toDate() : new Date(r.inicio)).toDateString() === hoyStr).sort((a, b) => ms(b.fin) - ms(a.fin));
+  return (
+    <div className="mb-6">
+      <p className="text-xs uppercase tracking-wide mb-2" style={{ color: DORADO }}>🟢 Equipo ahora · tiempo real</p>
+      {enCurso.length === 0 && <p className="text-sm text-stone-400 mb-2">Nadie tiene una tarea en curso ahora mismo.</p>}
+      <div className="space-y-2">
+        {enCurso.map((r) => (
+          <Tarjeta key={r.id} className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold" style={{ color: BLANCO }}>{r.operarioNombre || "Operario"}</p>
+                <p className="text-sm" style={{ color: BLANCO }}>{r.tipoTareaNombre}{r.maquinaNombre ? " · " + r.maquinaNombre : ""}</p>
+                <p className="text-xs text-stone-400">Empezó el {fmtDia(r.inicio)} a las {horaCorta(r.inicio)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-lg font-semibold" style={{ color: DORADO }}>{fmtDur(ahora - ms(r.inicio))}</p>
+                <p className="text-xs text-stone-400">en curso</p>
+              </div>
+            </div>
+          </Tarjeta>
+        ))}
+      </div>
+      {hoyFin.length > 0 && <p className="text-xs uppercase tracking-wide mt-4 mb-2 text-stone-400">Finalizadas hoy</p>}
+      <div className="space-y-2">
+        {hoyFin.map((r) => (
+          <Tarjeta key={r.id} className="p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium" style={{ color: BLANCO }}>{r.operarioNombre || "Operario"} · {r.tipoTareaNombre}{r.maquinaNombre ? " · " + r.maquinaNombre : ""}</p>
+                <p className="text-xs text-stone-400">{fmtDia(r.inicio)} · {horaCorta(r.inicio)} → {horaCorta(r.fin)}</p>
+              </div>
+              <p className="text-sm font-semibold text-stone-300">{fmtDur(ms(r.fin) - ms(r.inicio))}</p>
+            </div>
+          </Tarjeta>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
   const [mostrarInformes, setMostrarInformes] = useState(false);
   const { datos: tipos } = useColeccion("mant_tipos_tarea", "nombre", "asc");
@@ -2320,6 +2370,8 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
         )}
       </Cabecera>
 
+      {userRole !== "jardinero" && <PanelEquipoAhora registros={registros} />}
+
       {enCurso ? (
         <Tarjeta className="p-5 mb-6" style={{ borderColor: DORADO }}>
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: DORADO }}>Tarea en curso</p>
@@ -2338,7 +2390,7 @@ function RegistroTrabajo({ usuario, nombreOperario, userRole }) {
           <Tarjeta key={r.id} className="p-4 flex items-center justify-between">
             <div>
               <p className="font-medium" style={{ color: BLANCO }}>{r.tipoTareaNombre}</p>
-                  <p className="text-xs text-stone-500">{horaCorta(r.inicio)}{r.fin ? ` - ${horaCorta(r.fin)}` : ""}</p>
+                  <p className="text-xs text-stone-500">{(r.inicio?.toDate ? r.inicio.toDate() : new Date(r.inicio)).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })} · {horaCorta(r.inicio)}{r.fin ? ` - ${horaCorta(r.fin)}` : ""}</p>
                   {userRole !== "jardinero" && (
                     <button onClick={async () => { if (!confirm("Eliminar este registro de trabajo?")) return; await borrarDoc("mant_registro_trabajo", r.id); }} className="text-stone-400 hover:text-red-500 ml-2"><Trash2 size={12} /></button>
                   )}
