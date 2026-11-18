@@ -1255,6 +1255,9 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
   const [fecha, setFecha] = useState("");
   const [nota, setNota] = useState("");
   const [err, setErr] = useState("");
+  const [comp, setComp] = useState(null);
+  const [obs, setObs] = useState("");
+  const [editObs, setEditObs] = useState(null);
   const hoy = mtHoy();
   const pend = tareas.filter((t) => !t.hecha).sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999") || (a.creadoEn || 0) - (b.creadoEn || 0));
   const hechas = tareas.filter((t) => t.hecha).sort((a, b) => (b.hechaEn || 0) - (a.hechaEn || 0));
@@ -1267,7 +1270,8 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
     await F.addDoc(F.collection(db, ...MT_COL), { titulo: titulo.trim(), fechaLimite: fecha || "", nota: nota.trim(), hecha: false, creadoEn: Date.now() });
     setTitulo(""); setFecha(""); setNota("");
   });
-  const hecha = (t) => run(() => F.updateDoc(F.doc(db, ...MT_COL, t.id), { hecha: true, hechaEn: Date.now() }));
+  const hecha = (t, o) => run(async () => { await F.updateDoc(F.doc(db, ...MT_COL, t.id), { hecha: true, hechaEn: Date.now(), observaciones: (o || "").trim() }); setComp(null); setObs(""); });
+  const guardarObs = (t, o) => run(async () => { await F.updateDoc(F.doc(db, ...MT_COL, t.id), { observaciones: (o || "").trim() }); setEditObs(null); });
   const reabrir = (t) => run(() => F.updateDoc(F.doc(db, ...MT_COL, t.id), { hecha: false, hechaEn: null }));
   const borrar = (t) => run(async () => { if (window.confirm("¿Eliminar definitivamente «" + t.titulo + "»?")) await F.deleteDoc(F.doc(db, ...MT_COL, t.id)); });
 
@@ -1293,10 +1297,20 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
             const venc = t.fechaLimite && t.fechaLimite < hoy;
             return (
               <div key={t.id} style={{ background: "#fff", color: "#1f2a33", borderRadius: 10, padding: "10px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10, borderLeft: "4px solid " + (venc ? "#E2685C" : t.fechaLimite === hoy ? "#E0A030" : "#2F6B3F") }}>
-                <button onClick={() => hecha(t)} title="Marcar como hecha" style={{ width: 26, height: 26, borderRadius: 13, border: "2px solid #2F6B3F", background: "#fff", cursor: "pointer", flexShrink: 0 }} />
+                <button onClick={() => { setComp(comp === t.id ? null : t.id); setObs(""); }} title="Marcar como hecha" style={{ width: 26, height: 26, borderRadius: 13, border: "2px solid #2F6B3F", background: "#fff", cursor: "pointer", flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{t.titulo}</div>
                   {(t.fechaLimite || t.nota) && <div style={{ fontSize: 12, color: venc ? "#C0392B" : "#6b7a86" }}>{t.fechaLimite ? (venc ? "Vencida: " : "Para: ") + new Date(t.fechaLimite + "T12:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" }) : ""}{t.fechaLimite && t.nota ? " · " : ""}{t.nota}</div>}
+                  {comp === t.id && (
+                    <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                      <textarea autoFocus rows={2} style={{ ...inp, width: "100%", resize: "vertical" }} placeholder="Observaciones de cómo se ha realizado (opcional)…" value={obs} onChange={(e) => setObs(e.target.value)} />
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <button style={btn("#2F6B3F", "#fff")} onClick={() => hecha(t, obs)}>✅ Marcar como hecha</button>
+                        <button style={btn("#E6EBF0", "#333")} onClick={() => { setComp(null); setObs(""); }}>Cancelar</button>
+                        <span style={{ fontSize: 11, color: "#6b7a86" }}>Se guardará con la fecha y hora de ahora.</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <button onClick={() => borrar(t)} title="Eliminar" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 15, color: "#9aa7b1" }}>🗑</button>
               </div>
@@ -1313,6 +1327,21 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, textDecoration: "line-through", color: "#6b7a86" }}>{t.titulo}</div>
                 <div style={{ fontSize: 12, color: "#2F6B3F" }}>Realizada el {mtFechaHora(t.hechaEn)}{t.nota ? " · " + t.nota : ""}</div>
+                {t.creadoEn && <div style={{ fontSize: 11, color: "#6b7a86" }}>Creada el {mtFechaHora(t.creadoEn)}{t.fechaLimite ? " · Límite: " + new Date(t.fechaLimite + "T12:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" }) : ""}</div>}
+                {editObs && editObs.id === t.id ? (
+                  <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
+                    <textarea autoFocus rows={2} style={{ ...inp, width: "100%", resize: "vertical" }} value={editObs.texto} onChange={(e) => setEditObs({ id: t.id, texto: e.target.value })} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button style={btn("#2F6B3F", "#fff")} onClick={() => guardarObs(t, editObs.texto)}>Guardar</button>
+                      <button style={btn("#E6EBF0", "#333")} onClick={() => setEditObs(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "#1f2a33", marginTop: 3 }}>
+                    {t.observaciones ? <span>📝 {t.observaciones} </span> : <span style={{ color: "#9aa7b1" }}>Sin observaciones </span>}
+                    <span onClick={() => setEditObs({ id: t.id, texto: t.observaciones || "" })} style={{ color: "#2F6B3F", cursor: "pointer", fontWeight: 600 }}>{t.observaciones ? "✏️ editar" : "+ añadir observaciones"}</span>
+                  </div>
+                )}
               </div>
               <button onClick={() => reabrir(t)} style={btn("#E6EBF0", "#333")}>Reabrir</button>
               <button onClick={() => borrar(t)} title="Eliminar" style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 15, color: "#9aa7b1" }}>🗑</button>
