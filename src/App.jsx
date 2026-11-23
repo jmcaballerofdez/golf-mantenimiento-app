@@ -1585,23 +1585,72 @@ function Dashboard({ irA }) {
   const { datos: partes } = useColeccion("mant_partes");
   const { datos: maquinaria } = useColeccion("mant_maquinaria");
   const { datos: aplicaciones } = useColeccion("mant_aplicaciones");
+  const { datos: inventario } = useColeccion("mant_inventario");
+  const { datos: ausencias } = useColeccion("mant_ausencias");
 
-  const tareasPendientes = tareas.filter((t) => t.estado !== "Completada").length;
-  const partesAbiertos = partes.filter((p) => p.estado !== "Completada").length;
+  const hoy = mtHoy();
+  const en7 = (() => { const d = new Date(); d.setDate(d.getDate() + 7); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })();
+  const fmtF = (s) => (s ? String(s).split("-").reverse().join("/") : "");
+  const nombres = (arr, f) => {
+    const n = arr.map(f);
+    return n.length <= 3 ? n.join(", ") : n.slice(0, 3).join(", ") + ` y ${n.length - 3} más`;
+  };
+
+  const tareasPendientes = tareas.filter((t) => t.estado !== "Completada");
+  const partesAbiertos = partes.filter((p) => p.estado !== "Completada");
   const maquinasOperativas = maquinaria.filter((m) => m.estado === "Operativa").length;
   const aplicacionesMes = aplicaciones.filter((a) => {
     if (a.estado === "Planificada") return false;
-    const prefijo = new Date().toISOString().slice(0, 7);
-    if (a.fechaAplicacion) return String(a.fechaAplicacion).startsWith(prefijo);
+    if (a.fechaAplicacion) return String(a.fechaAplicacion).startsWith(hoy.slice(0, 7));
     const d = a.creadoEn?.toDate ? a.creadoEn.toDate() : null;
     if (!d) return false;
     const ahora = new Date();
     return d.getMonth() === ahora.getMonth() && d.getFullYear() === ahora.getFullYear();
   }).length;
 
+  // ── Alertas ───────────────────────────────────────────────────────
+  const tareasVencidas = tareasPendientes.filter((t) => t.fechaLimite && t.fechaLimite < hoy);
+  const partesGraves = partesAbiertos.filter((p) => p.gravedad === "Grave");
+  const revisiones = maquinaria.map((m) => ({ m, r: estadoRevisionMaquina(m) }));
+  const revVencidas = revisiones.filter((x) => x.r.nivel === "vencida");
+  const revProximas = revisiones.filter((x) => x.r.nivel === "pronto");
+  const fueraServicio = maquinaria.filter((m) => m.estado === "Fuera de servicio");
+  const enTaller = maquinaria.filter((m) => m.estado === "En taller");
+  const aplAtrasadas = aplicaciones.filter((a) => a.estado === "Planificada" && a.fechaPlanificada && a.fechaPlanificada < hoy);
+  const aplProximas = aplicaciones.filter((a) => a.estado === "Planificada" && a.fechaPlanificada && a.fechaPlanificada >= hoy && a.fechaPlanificada <= en7);
+  const carencias = aplicaciones.filter((a) => {
+    if (a.estado === "Planificada" || !a.fechaAplicacion || !(Number(a.plazoSeguridad) > 0)) return false;
+    const d = new Date(a.fechaAplicacion + "T00:00:00"); d.setDate(d.getDate() + Number(a.plazoSeguridad));
+    const fin = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    a._fin = fin;
+    return fin >= hoy;
+  });
+  const stockSin = inventario.filter((p) => (Number(p.stock) || 0) <= 0);
+  const stockBajo = inventario.filter((p) => {
+    const s = Number(p.stock) || 0;
+    const min = p.stockMinimo === "" || p.stockMinimo == null ? 0 : Number(p.stockMinimo);
+    return s > 0 && min > 0 && s <= min;
+  });
+  const ausPendientes = ausencias.filter((a) => a.estado === "Pendiente");
+
+  const alertas = [
+    partesGraves.length > 0 && { tono: "rojo", titulo: `${partesGraves.length} parte${partesGraves.length > 1 ? "s" : ""} de incidencia grave${partesGraves.length > 1 ? "s" : ""} abierto${partesGraves.length > 1 ? "s" : ""}`, detalle: nombres(partesGraves, (p) => p.titulo), ir: "partes" },
+    tareasVencidas.length > 0 && { tono: "rojo", titulo: `${tareasVencidas.length} tarea${tareasVencidas.length > 1 ? "s" : ""} de campo vencida${tareasVencidas.length > 1 ? "s" : ""}`, detalle: nombres(tareasVencidas, (t) => t.titulo), ir: "tareas" },
+    fueraServicio.length > 0 && { tono: "rojo", titulo: `${fueraServicio.length} máquina${fueraServicio.length > 1 ? "s" : ""} fuera de servicio`, detalle: nombres(fueraServicio, (m) => m.nombre), ir: "maquinaria" },
+    revVencidas.length > 0 && { tono: "rojo", titulo: `${revVencidas.length} revisión${revVencidas.length > 1 ? "es" : ""} de maquinaria vencida${revVencidas.length > 1 ? "s" : ""}`, detalle: nombres(revVencidas, (x) => x.m.nombre), ir: "maquinaria" },
+    aplAtrasadas.length > 0 && { tono: "rojo", titulo: `${aplAtrasadas.length} aplicación${aplAtrasadas.length > 1 ? "es" : ""} planificada${aplAtrasadas.length > 1 ? "s" : ""} atrasada${aplAtrasadas.length > 1 ? "s" : ""}`, detalle: nombres(aplAtrasadas, (a) => `${a.producto} (${a.zona})`), ir: "aplicaciones" },
+    stockSin.length > 0 && { tono: "rojo", titulo: `${stockSin.length} producto${stockSin.length > 1 ? "s" : ""} sin stock`, detalle: nombres(stockSin, (p) => p.nombre), ir: "inventario" },
+    enTaller.length > 0 && { tono: "ambar", titulo: `${enTaller.length} máquina${enTaller.length > 1 ? "s" : ""} en taller`, detalle: nombres(enTaller, (m) => m.nombre), ir: "maquinaria" },
+    revProximas.length > 0 && { tono: "ambar", titulo: `${revProximas.length} revisión${revProximas.length > 1 ? "es" : ""} próxima${revProximas.length > 1 ? "s" : ""}`, detalle: nombres(revProximas, (x) => `${x.m.nombre} · ${x.r.texto.replace("Revisión ", "")}`), ir: "maquinaria" },
+    aplProximas.length > 0 && { tono: "ambar", titulo: `${aplProximas.length} aplicación${aplProximas.length > 1 ? "es" : ""} planificada${aplProximas.length > 1 ? "s" : ""} en los próximos 7 días`, detalle: nombres(aplProximas, (a) => `${a.producto} (${fmtF(a.fechaPlanificada).slice(0, 5)})`), ir: "aplicaciones" },
+    carencias.length > 0 && { tono: "ambar", titulo: `${carencias.length} plazo${carencias.length > 1 ? "s" : ""} de seguridad activo${carencias.length > 1 ? "s" : ""}`, detalle: nombres(carencias, (a) => `${a.zona}: ${a.producto} hasta ${fmtF(a._fin)}`), ir: "aplicaciones" },
+    stockBajo.length > 0 && { tono: "ambar", titulo: `${stockBajo.length} producto${stockBajo.length > 1 ? "s" : ""} con stock bajo`, detalle: nombres(stockBajo, (p) => `${p.nombre} (${Number(p.stock) || 0} ${p.unidad})`), ir: "inventario" },
+    ausPendientes.length > 0 && { tono: "ambar", titulo: `${ausPendientes.length} solicitud${ausPendientes.length > 1 ? "es" : ""} de ausencia por aprobar`, detalle: "", ir: "ausencias" },
+  ].filter(Boolean);
+
   const tarjetas = [
-    { id: "tareas", label: "Tareas pendientes", valor: tareasPendientes, Icon: ClipboardCheck, tone: "verde" },
-    { id: "partes", label: "Partes abiertos", valor: partesAbiertos, Icon: AlertTriangle, tone: partesAbiertos > 0 ? "rojo" : "verde" },
+    { id: "tareas", label: "Tareas pendientes", valor: tareasPendientes.length, Icon: ClipboardCheck, tone: tareasVencidas.length > 0 ? "rojo" : "verde" },
+    { id: "partes", label: "Partes abiertos", valor: partesAbiertos.length, Icon: AlertTriangle, tone: partesAbiertos.length > 0 ? "rojo" : "verde" },
     { id: "maquinaria", label: "Maquinaria operativa", valor: `${maquinasOperativas}/${maquinaria.length || 0}`, Icon: Tractor, tone: "neutral" },
     { id: "aplicaciones", label: "Aplicaciones este mes", valor: aplicacionesMes, Icon: FlaskConical, tone: "dorado" },
   ];
@@ -1612,6 +1661,9 @@ function Dashboard({ irA }) {
     dorado: "bg-amber-50 text-amber-700",
     neutral: "bg-stone-100 text-stone-500",
   };
+
+  const proximasTareas = [...tareasPendientes].sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999")).slice(0, 5);
+  const partesRecientes = [...partesAbiertos, ...partes.filter((p) => p.estado === "Completada")].slice(0, 5);
 
   return (
     <div>
@@ -1632,27 +1684,51 @@ function Dashboard({ irA }) {
         ))}
       </div>
 
+      <Tarjeta className="p-5 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-[15px]" style={{ color: BLANCO }}>Requiere atención</h2>
+          {alertas.length > 0 && <Badge tone={alertas.some((a) => a.tono === "rojo") ? "rojo" : "ambar"}>{alertas.length}</Badge>}
+        </div>
+        {alertas.length === 0 && (
+          <p className="text-sm text-stone-400 flex items-center gap-2"><Check size={16} /> Todo en orden: sin alertas pendientes.</p>
+        )}
+        <ul className="space-y-1">
+          {alertas.map((a, i) => (
+            <li key={i}>
+              <button onClick={() => irA(a.ir)} className="w-full text-left flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-stone-50/70 transition">
+                <span className="mt-1.5 w-2.5 h-2.5 rounded-full shrink-0" style={{ background: a.tono === "rojo" ? "#dc2626" : "#d97706" }} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium" style={{ color: BLANCO }}>{a.titulo}</span>
+                  {a.detalle && <span className="block text-xs text-stone-500 truncate">{a.detalle}</span>}
+                </span>
+                <ChevronRight size={16} className="ml-auto mt-1 text-stone-400 shrink-0" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </Tarjeta>
+
       <div className="grid md:grid-cols-2 gap-6">
         <Tarjeta className="p-5">
-          <h2 className="font-semibold mb-3 text-[15px]" style={{ color: BLANCO }}>Últimos partes de incidencia</h2>
-          {partes.slice(0, 5).length === 0 && <p className="text-sm text-stone-400">Sin partes registrados.</p>}
+          <h2 className="font-semibold mb-3 text-[15px]" style={{ color: BLANCO }}>Partes de incidencia</h2>
+          {partesRecientes.length === 0 && <p className="text-sm text-stone-400">Sin partes registrados.</p>}
           <ul className="space-y-2.5">
-            {partes.slice(0, 5).map((p) => (
+            {partesRecientes.map((p) => (
               <li key={p.id} className="flex items-center justify-between text-sm gap-3">
                 <span className="truncate text-stone-700">{p.titulo}</span>
-                <Badge tone={toneGravedad(p.gravedad)}>{p.gravedad}</Badge>
+                <Badge tone={p.estado === "Completada" ? "verde" : toneGravedad(p.gravedad)}>{p.estado === "Completada" ? "Resuelto" : p.gravedad}</Badge>
               </li>
             ))}
           </ul>
         </Tarjeta>
         <Tarjeta className="p-5">
           <h2 className="font-semibold mb-3 text-[15px]" style={{ color: BLANCO }}>Tareas próximas</h2>
-          {tareas.slice(0, 5).length === 0 && <p className="text-sm text-stone-400">Sin tareas registradas.</p>}
+          {proximasTareas.length === 0 && <p className="text-sm text-stone-400">Sin tareas pendientes.</p>}
           <ul className="space-y-2.5">
-            {tareas.slice(0, 5).map((t) => (
+            {proximasTareas.map((t) => (
               <li key={t.id} className="flex items-center justify-between text-sm gap-3">
-                <span className="truncate text-stone-700">{t.titulo}</span>
-                <Badge tone={toneEstado(t.estado)}>{t.estado}</Badge>
+                <span className="truncate text-stone-700">{t.titulo}{t.fechaLimite ? <span className="text-stone-500 text-xs"> · {fmtF(t.fechaLimite).slice(0, 5)}</span> : null}</span>
+                {t.fechaLimite && t.fechaLimite < hoy ? <Badge tone="rojo">Vencida</Badge> : <Badge tone={toneEstado(t.estado)}>{t.estado}</Badge>}
               </li>
             ))}
           </ul>
@@ -2015,7 +2091,7 @@ function Aplicaciones() {
   const [editando, setEditando] = useState(null);
   const [vista, setVista] = useState("registro");
   const [filtroEstado, setFiltroEstado] = useState("Todas");
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = mtHoy();
   const [anio, setAnio] = useState(new Date().getFullYear());
   const vacio = {
     estado: "Realizada", productoId: "", producto: "", tipo: TIPOS_APLICACION[0], zona: ZONAS[0], motivo: "",
@@ -2327,7 +2403,7 @@ function Maquinaria() {
   const [editando, setEditando] = useState(null);
   const vacio = { nombre: "", tipo: "", modelo: "", horometro: "", estado: ESTADOS_MAQUINA[0], proximoMantenimiento: "", intervaloHoras: "", intervaloDias: "", ultimaRevisionHoras: "", ultimaRevisionFecha: "", notas: "" };
   const [form, setForm] = useState(vacio);
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = mtHoy();
   const vacioEntrada = { fecha: hoy, tipo: TIPOS_INTERVENCION[0], descripcion: "", horometro: "", coste: "", diasParada: "", realizadoPor: "" };
   const [entrada, setEntrada] = useState(vacioEntrada);
 
@@ -2548,7 +2624,7 @@ function Inventario({ nombreOperario }) {
   const [filtroCat, setFiltroCat] = useState("Todas");
   const [soloBajo, setSoloBajo] = useState(false);
   const [busca, setBusca] = useState("");
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = mtHoy();
   const vacio = { nombre: "", categoria: CATEGORIAS_INVENTARIO[0], unidad: "kg", stock: "", stockMinimo: "", precioUnitario: "", proveedor: "", ubicacion: "", notas: "" };
   const [form, setForm] = useState(vacio);
   const vacioMov = { fecha: hoy, tipo: "Entrada", cantidad: "", precio: "", nota: "" };
