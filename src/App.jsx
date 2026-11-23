@@ -1590,6 +1590,9 @@ function Dashboard({ irA }) {
   const partesAbiertos = partes.filter((p) => p.estado !== "Completada").length;
   const maquinasOperativas = maquinaria.filter((m) => m.estado === "Operativa").length;
   const aplicacionesMes = aplicaciones.filter((a) => {
+    if (a.estado === "Planificada") return false;
+    const prefijo = new Date().toISOString().slice(0, 7);
+    if (a.fechaAplicacion) return String(a.fechaAplicacion).startsWith(prefijo);
     const d = a.creadoEn?.toDate ? a.creadoEn.toDate() : null;
     if (!d) return false;
     const ahora = new Date();
@@ -2006,58 +2009,265 @@ function Partes() {
 // ═══════════════════════════════════════════════════════════════════
 function Aplicaciones() {
   const { datos: aplicaciones } = useColeccion("mant_aplicaciones");
+  const { datos: productos } = useColeccion("mant_inventario", "nombre", "asc");
+  const { datos: equipo } = useColeccion("mant_equipo", "nombre", "asc");
   const [modal, setModal] = useState(false);
   const [editando, setEditando] = useState(null);
-  const vacio = { producto: "", tipo: TIPOS_APLICACION[0], zona: ZONAS[0], dosis: "", superficie: "", fechaAplicacion: "", plazoSeguridad: "", condiciones: "", aplicadoPor: "", notas: "" };
+  const [vista, setVista] = useState("registro");
+  const [filtroEstado, setFiltroEstado] = useState("Todas");
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [anio, setAnio] = useState(new Date().getFullYear());
+  const vacio = {
+    estado: "Realizada", productoId: "", producto: "", tipo: TIPOS_APLICACION[0], zona: ZONAS[0], motivo: "",
+    dosis: "", superficie: "", cantidadUsada: "", coste: "", numRegistro: "",
+    fechaPlanificada: "", fechaAplicacion: hoy, plazoSeguridad: "", condiciones: "", aplicadoPor: "", notas: "", stockDescontado: false,
+  };
   const [form, setForm] = useState(vacio);
-  const { datos: equipo } = useColeccion("mant_equipo", "nombre", "asc");
 
-  function abrirNuevo() { setEditando(null); setForm(vacio); setModal(true); }
-  function abrirEditar(a) { setEditando(a); setForm({ ...vacio, ...a }); setModal(true); }
+  const fmtF = (s) => (s ? String(s).split("-").reverse().join("/") : "—");
+  const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  const esPlanificada = (a) => a.estado === "Planificada";
+  const fechaDe = (a) => (esPlanificada(a) ? a.fechaPlanificada : a.fechaAplicacion) || "";
+  const finCarencia = (a) => {
+    if (esPlanificada(a) || !a.fechaAplicacion || !(Number(a.plazoSeguridad) > 0)) return "";
+    const d = new Date(a.fechaAplicacion + "T00:00:00");
+    d.setDate(d.getDate() + Number(a.plazoSeguridad));
+    return d.toISOString().slice(0, 10);
+  };
+  const carenciaActiva = (a) => { const f = finCarencia(a); return !!f && f >= hoy; };
+  const atrasada = (a) => esPlanificada(a) && a.fechaPlanificada && a.fechaPlanificada < hoy;
+
+  function tipoDeCategoria(cat) {
+    if (cat === "Fertilizante") return "Fertilizante";
+    if (cat === "Fitosanitario") return "Fitosanitario (fungicida)";
+    return null;
+  }
+
+  function abrirNuevo(estado = "Realizada") {
+    setEditando(null);
+    setForm({ ...vacio, estado, fechaAplicacion: estado === "Realizada" ? hoy : "", fechaPlanificada: estado === "Planificada" ? hoy : "" });
+    setModal(true);
+  }
+  function abrirEditar(a) {
+    setEditando(a);
+    setForm({ ...vacio, ...a });
+    setModal(true);
+  }
+  function realizar(a) {
+    setEditando(a);
+    setForm({ ...vacio, ...a, estado: "Realizada", fechaAplicacion: hoy });
+    setModal(true);
+  }
+
+  const prodSel = productos.find((p) => p.id === form.productoId) || null;
+
+  function elegirProducto(id) {
+    const p = productos.find((x) => x.id === id);
+    if (!p) { setForm({ ...form, productoId: "" }); return; }
+    setForm({ ...form, productoId: id, producto: p.nombre, tipo: tipoDeCategoria(p.categoria) || form.tipo });
+  }
+
+  function cambiarCantidad(v) {
+    const next = { ...form, cantidadUsada: v };
+    if (prodSel && Number(prodSel.precioUnitario) > 0 && v !== "") {
+      next.coste = (Math.round(Number(v) * Number(prodSel.precioUnitario) * 100) / 100).toString();
+    }
+    setForm(next);
+  }
+
+  async function movimientoStock(prod, tipo, cantidad, nota, quien) {
+    const antes = Number(prod.stock) || 0;
+    const despues = Math.round((tipo === "Salida" ? antes - cantidad : antes + cantidad) * 1000) / 1000;
+    const nuevo = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      fecha: hoy, tipo, cantidad, stockDespues: despues, precio: "", nota, quien: quien || "",
+    };
+    await actualizarDoc("mant_inventario", prod.id, { stock: despues, movimientos: [...(prod.movimientos || []), nuevo].slice(-300) });
+  }
 
   async function guardar() {
     if (!form.producto.trim()) return;
-    if (editando) await actualizarDoc("mant_aplicaciones", editando.id, form);
-    else await crearDoc("mant_aplicaciones", form);
+    const { id, creadoEn, ...datos } = form;
+    const cant = Number(form.cantidadUsada) || 0;
+    datos.stockDescontado = !!form.stockDescontado;
+    // Descontar del inventario al registrar una aplicación realizada (solo una vez)
+    if (datos.estado === "Realizada" && prodSel && cant > 0 && !datos.stockDescontado) {
+      if ((Number(prodSel.stock) || 0) < cant) {
+        if (!window.confirm(`En el inventario solo hay ${prodSel.stock} ${prodSel.unidad} de «${prodSel.nombre}». ¿Registrar la aplicación igualmente, sin descontar del inventario?`)) return;
+      } else {
+        await movimientoStock(prodSel, "Salida", cant, `Aplicación: ${datos.zona}${datos.motivo ? " · " + datos.motivo : ""}`, datos.aplicadoPor);
+        datos.stockDescontado = true;
+      }
+    }
+    if (editando) await actualizarDoc("mant_aplicaciones", editando.id, datos);
+    else await crearDoc("mant_aplicaciones", datos);
     setModal(false);
   }
 
+  async function borrar() {
+    if (!editando) return;
+    if (!window.confirm("¿Eliminar esta aplicación?")) return;
+    const a = editando;
+    const prod = productos.find((p) => p.id === a.productoId);
+    if (a.stockDescontado && prod && Number(a.cantidadUsada) > 0) {
+      if (window.confirm(`¿Devolver ${a.cantidadUsada} ${prod.unidad} de «${prod.nombre}» al inventario?`)) {
+        await movimientoStock(prod, "Entrada", Number(a.cantidadUsada), "Devolución por aplicación eliminada", "");
+      }
+    }
+    await borrarDoc("mant_aplicaciones", a.id);
+    setModal(false);
+  }
+
+  const delAnio = aplicaciones.filter((a) => String(fechaDe(a)).startsWith(String(anio)));
+  const resumen = useMemo(() => {
+    const realizadas = aplicaciones.filter((a) => !esPlanificada(a) && String(a.fechaAplicacion || "").startsWith(String(anio)));
+    return {
+      n: realizadas.length,
+      coste: realizadas.reduce((s, a) => s + (Number(a.coste) || 0), 0),
+      carencias: aplicaciones.filter(carenciaActiva).length,
+      pendientes: aplicaciones.filter(esPlanificada).length,
+      atrasadas: aplicaciones.filter(atrasada).length,
+    };
+  }, [aplicaciones, anio]);
+
+  const lista = [...aplicaciones]
+    .filter((a) => filtroEstado === "Todas" || (filtroEstado === "Planificadas" ? esPlanificada(a) : !esPlanificada(a)))
+    .sort((a, b) => String(fechaDe(b)).localeCompare(String(fechaDe(a))));
+
+  const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
   return (
     <div>
-      <Cabecera titulo="Aplicaciones" subtitulo="Registro de fertilizantes y fitosanitarios aplicados al campo.">
-        <BotonPrimario onClick={abrirNuevo}>Nueva aplicación</BotonPrimario>
+      <Cabecera titulo="Aplicaciones" subtitulo="Registro y programa anual de fertilizantes y fitosanitarios, con carencias, coste y descuento de inventario.">
+        <BotonSecundario onClick={() => abrirNuevo("Planificada")}>Planificar</BotonSecundario>
+        <BotonPrimario onClick={() => abrirNuevo("Realizada")}>Nueva aplicación</BotonPrimario>
       </Cabecera>
 
-      <Tarjeta className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-stone-500 border-b border-stone-100">
-              <th className="px-5 py-3.5 font-medium">Producto</th>
-              <th className="px-5 py-3.5 font-medium">Tipo</th>
-              <th className="px-5 py-3.5 font-medium">Zona</th>
-              <th className="px-5 py-3.5 font-medium">Fecha</th>
-              <th className="px-5 py-3.5 font-medium">Carencia</th>
-            </tr>
-          </thead>
-          <tbody>
-            {aplicaciones.length === 0 && (
-              <tr><td colSpan={5} className="px-5 py-6 text-center text-stone-400">Sin aplicaciones registradas.</td></tr>
-            )}
-            {aplicaciones.map((a) => (
-              <tr key={a.id} onClick={() => abrirEditar(a)} className="border-b border-stone-50 last:border-0 cursor-pointer hover:bg-stone-50/70 transition">
-                <td className="px-5 py-3.5 font-medium" style={{ color: BLANCO }}>{a.producto}</td>
-                <td className="px-5 py-3.5 text-stone-600">{a.tipo}</td>
-                <td className="px-5 py-3.5 text-stone-600">{a.zona}</td>
-                <td className="px-5 py-3.5 text-stone-600">{a.fechaAplicacion || "—"}</td>
-                <td className="px-5 py-3.5 text-stone-600">{a.plazoSeguridad ? `${a.plazoSeguridad} días` : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Tarjeta>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{resumen.n}</div>
+          <div className="text-xs text-stone-500 mt-2">Aplicaciones realizadas {anio}</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{eur(resumen.coste)}</div>
+          <div className="text-xs text-stone-500 mt-2">Coste de productos {anio}</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.carencias > 0 ? "#d97706" : BLANCO, fontFamily: SERIF }}>{resumen.carencias}</div>
+          <div className="text-xs text-stone-500 mt-2">Plazos de seguridad activos</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.atrasadas > 0 ? "#dc2626" : BLANCO, fontFamily: SERIF }}>{resumen.pendientes}</div>
+          <div className="text-xs text-stone-500 mt-2">Planificadas pendientes{resumen.atrasadas > 0 ? ` (${resumen.atrasadas} atrasadas)` : ""}</div>
+        </Tarjeta>
+      </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title={editando ? "Editar aplicación" : "Nueva aplicación"} wide>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <PillFiltro activo={vista === "registro"} onClick={() => setVista("registro")}>Registro</PillFiltro>
+        <PillFiltro activo={vista === "programa"} onClick={() => setVista("programa")}>Programa anual</PillFiltro>
+        {vista === "registro" && ["Todas", "Planificadas", "Realizadas"].map((f) => (
+          <PillFiltro key={f} activo={filtroEstado === f} onClick={() => setFiltroEstado(f)}>{f}</PillFiltro>
+        ))}
+        {vista === "programa" && (
+          <span className="inline-flex items-center gap-1">
+            <button className="p-1 text-stone-500 hover:text-stone-800" onClick={() => setAnio(anio - 1)}><ChevronLeft size={18} /></button>
+            <span className="text-sm font-medium px-1" style={{ color: BLANCO }}>{anio}</span>
+            <button className="p-1 text-stone-500 hover:text-stone-800" onClick={() => setAnio(anio + 1)}><ChevronRight size={18} /></button>
+          </span>
+        )}
+      </div>
+
+      {vista === "registro" && (
+        <Tarjeta className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-stone-500 border-b border-stone-100">
+                <th className="px-5 py-3.5 font-medium">Producto</th>
+                <th className="px-5 py-3.5 font-medium">Zona</th>
+                <th className="px-5 py-3.5 font-medium">Fecha</th>
+                <th className="px-5 py-3.5 font-medium">Estado</th>
+                <th className="px-5 py-3.5 font-medium">Seguridad</th>
+                <th className="px-5 py-3.5 font-medium text-right">Coste</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lista.length === 0 && (
+                <tr><td colSpan={6} className="px-5 py-6 text-center text-stone-400">Sin aplicaciones registradas.</td></tr>
+              )}
+              {lista.map((a) => (
+                <tr key={a.id} onClick={() => abrirEditar(a)} className="border-b border-stone-50 last:border-0 cursor-pointer hover:bg-stone-50/70 transition">
+                  <td className="px-5 py-3.5">
+                    <div className="font-medium" style={{ color: BLANCO }}>{a.producto}</div>
+                    <div className="text-xs text-stone-500">{a.tipo}{a.motivo ? ` · ${a.motivo}` : ""}</div>
+                  </td>
+                  <td className="px-5 py-3.5 text-stone-600">{a.zona}</td>
+                  <td className="px-5 py-3.5 text-stone-600">{fmtF(fechaDe(a))}</td>
+                  <td className="px-5 py-3.5">
+                    {esPlanificada(a)
+                      ? <Badge tone={atrasada(a) ? "rojo" : "dorado"}>{atrasada(a) ? "Atrasada" : "Planificada"}</Badge>
+                      : <Badge tone="verde">Realizada</Badge>}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {carenciaActiva(a)
+                      ? <Badge tone="ambar">Hasta {fmtF(finCarencia(a))}</Badge>
+                      : <span className="text-stone-500">{a.plazoSeguridad ? `${a.plazoSeguridad} d` : "—"}</span>}
+                  </td>
+                  <td className="px-5 py-3.5 text-stone-600 text-right">{Number(a.coste) > 0 ? eur(a.coste) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Tarjeta>
+      )}
+
+      {vista === "programa" && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {MESES.map((nombreMes, i) => {
+            const prefijo = `${anio}-${String(i + 1).padStart(2, "0")}`;
+            const delMes = delAnio.filter((a) => String(fechaDe(a)).startsWith(prefijo)).sort((a, b) => String(fechaDe(a)).localeCompare(String(fechaDe(b))));
+            return (
+              <Tarjeta key={nombreMes} className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-semibold text-[15px]" style={{ color: BLANCO, fontFamily: SERIF }}>{nombreMes}</p>
+                  <span className="text-xs text-stone-500">{delMes.length || ""}</span>
+                </div>
+                {delMes.length === 0 && <p className="text-xs text-stone-400">Sin aplicaciones</p>}
+                <ul className="space-y-2">
+                  {delMes.map((a) => (
+                    <li key={a.id} className="flex items-center justify-between gap-2 text-sm">
+                      <button onClick={() => abrirEditar(a)} className="text-left min-w-0 text-stone-700 hover:underline">
+                        <span className="text-stone-500 text-xs">{fmtF(fechaDe(a)).slice(0, 5)} · </span>
+                        <span className="truncate">{a.producto}</span>
+                        <span className="text-stone-500 text-xs"> · {a.zona}</span>
+                      </button>
+                      {esPlanificada(a)
+                        ? <button onClick={() => realizar(a)}><Badge tone={atrasada(a) ? "rojo" : "dorado"}>Hacer</Badge></button>
+                        : <Badge tone="verde">✓</Badge>}
+                    </li>
+                  ))}
+                </ul>
+              </Tarjeta>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal open={modal} onClose={() => setModal(false)} title={editando ? "Editar aplicación" : form.estado === "Planificada" ? "Planificar aplicación" : "Nueva aplicación"} wide>
         <div className="grid sm:grid-cols-2 gap-x-4">
+          <Field label="Estado">
+            <select className={inputCls} value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value, fechaAplicacion: e.target.value === "Realizada" && !form.fechaAplicacion ? hoy : form.fechaAplicacion })}>
+              <option value="Planificada">Planificada (programa anual)</option>
+              <option value="Realizada">Realizada</option>
+            </select>
+          </Field>
+          <Field label="Producto del inventario">
+            <select className={inputCls} value={form.productoId} onChange={(e) => elegirProducto(e.target.value)}>
+              <option value="">— Otro / sin inventario —</option>
+              {productos.filter((p) => ["Fertilizante", "Fitosanitario", "Semillas", "Arena y sustratos", "Otro"].includes(p.categoria)).map((p) => (
+                <option key={p.id} value={p.id}>{p.nombre} ({Number(p.stock) || 0} {p.unidad})</option>
+              ))}
+            </select>
+          </Field>
           <Field label="Producto"><input className={inputCls} value={form.producto} onChange={(e) => setForm({ ...form, producto: e.target.value })} /></Field>
           <Field label="Tipo">
             <select className={inputCls} value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
@@ -2069,10 +2279,19 @@ function Aplicaciones() {
               {ZONAS.map((z) => <option key={z}>{z}</option>)}
             </select>
           </Field>
+          <Field label="Motivo / plaga u objetivo"><input className={inputCls} placeholder="p.ej. Dollar spot, abonado de primavera" value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} /></Field>
           <Field label="Dosis"><input className={inputCls} placeholder="p.ej. 25 g/m²" value={form.dosis} onChange={(e) => setForm({ ...form, dosis: e.target.value })} /></Field>
           <Field label="Superficie tratada"><input className={inputCls} placeholder="p.ej. 6.500 m²" value={form.superficie} onChange={(e) => setForm({ ...form, superficie: e.target.value })} /></Field>
-          <Field label="Fecha de aplicación"><input type="date" className={inputCls} value={form.fechaAplicacion} onChange={(e) => setForm({ ...form, fechaAplicacion: e.target.value })} /></Field>
+          <Field label={`Cantidad de producto usada${prodSel ? ` (${prodSel.unidad})` : ""}`}><input type="number" step="any" className={inputCls} value={form.cantidadUsada} onChange={(e) => cambiarCantidad(e.target.value)} /></Field>
+          <Field label="Coste del producto (€)"><input type="number" step="0.01" className={inputCls} value={form.coste} onChange={(e) => setForm({ ...form, coste: e.target.value })} /></Field>
+          <Field label="Nº de registro (fitosanitarios)"><input className={inputCls} value={form.numRegistro} onChange={(e) => setForm({ ...form, numRegistro: e.target.value })} /></Field>
           <Field label="Plazo de seguridad (días)"><input type="number" className={inputCls} value={form.plazoSeguridad} onChange={(e) => setForm({ ...form, plazoSeguridad: e.target.value })} /></Field>
+          {form.estado === "Planificada" && (
+            <Field label="Fecha planificada"><input type="date" className={inputCls} value={form.fechaPlanificada} onChange={(e) => setForm({ ...form, fechaPlanificada: e.target.value })} /></Field>
+          )}
+          {form.estado === "Realizada" && (
+            <Field label="Fecha de aplicación"><input type="date" className={inputCls} value={form.fechaAplicacion} onChange={(e) => setForm({ ...form, fechaAplicacion: e.target.value })} /></Field>
+          )}
           <Field label="Aplicado por">
             <select className={inputCls} value={form.aplicadoPor} onChange={(e) => setForm({ ...form, aplicadoPor: e.target.value })}>
               <option value="">—</option>
@@ -2082,9 +2301,13 @@ function Aplicaciones() {
         </div>
         <Field label="Condiciones climáticas"><input className={inputCls} placeholder="p.ej. 18°C, sin viento" value={form.condiciones} onChange={(e) => setForm({ ...form, condiciones: e.target.value })} /></Field>
         <Field label="Notas"><textarea className={inputCls} rows={2} value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} /></Field>
+        {form.estado === "Realizada" && prodSel && Number(form.cantidadUsada) > 0 && !form.stockDescontado && (
+          <p className="text-xs text-stone-500 mb-2">Al guardar se descontarán {form.cantidadUsada} {prodSel.unidad} del inventario (quedan {Number(prodSel.stock) || 0}).</p>
+        )}
+        {form.stockDescontado && <p className="text-xs text-stone-500 mb-2">El consumo de esta aplicación ya se descontó del inventario.</p>}
         <div className="flex justify-between items-center mt-4">
           {editando ? (
-            <button onClick={async () => { await borrarDoc("mant_aplicaciones", editando.id); setModal(false); }} className="inline-flex items-center gap-1.5 text-red-600 text-sm hover:text-red-700">
+            <button onClick={borrar} className="inline-flex items-center gap-1.5 text-red-600 text-sm hover:text-red-700">
               <Trash2 size={14} /> Eliminar
             </button>
           ) : <span />}
