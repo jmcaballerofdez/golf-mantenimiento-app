@@ -13,7 +13,7 @@ import { BookOpen,
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
   GraduationCap, ShoppingCart, Wallet, Home,
   CalendarOff, Check, Settings, Plane, Stethoscope, Building2, Loader2, Shield, Lock,
-  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package,
+  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package, Flag,
 } from "lucide-react";
 
 // ─── Firebase Config ───────────────────────────────────────────────
@@ -95,6 +95,8 @@ const TIPOS_APLICACION = ["Fertilizante", "Fitosanitario (herbicida)", "Fitosani
 const ESTADOS_MAQUINA = ["Operativa", "En taller", "Fuera de servicio"];
 const CATEGORIAS_INVENTARIO = ["Fertilizante", "Fitosanitario", "Semillas", "Combustible y lubricantes", "Repuestos", "Material de riego", "Arena y sustratos", "Otro"];
 const UNIDADES_INVENTARIO = ["kg", "l", "ud", "saco", "bidón", "caja", "m", "t"];
+const DIRECCIONES_CORTE = ["↕ Norte–Sur", "↔ Este–Oeste", "⤢ NE–SO", "⤡ NO–SE", "⟳ Circular"];
+const ESTADOS_ZONA = ["Buena", "Atención", "Problema"];
 const TIPOS_INTERVENCION = ["Revisión", "Reparación", "Avería", "Afilado / ajuste", "Otro"];
 
 // Calcula si una máquina tiene la revisión vencida o próxima, por horas y/o por fecha.
@@ -1392,7 +1394,7 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
 
 export default function App() {
   const { currentUser: usuario, userRole, modulosActivos, nombreOperario, empleadoId, cargandoAuth } = useAuthMantenimiento();
-  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "parte_diario", "ausencias", "mis_documentos"];
+  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "parte_diario", "ausencias", "mis_documentos"];
   const [vista, setVista] = useState("dashboard");
   useEffect(() => {
     if (userRole === "jardinero" && !VISTAS_JARDINERO.includes(vista)) {
@@ -1425,6 +1427,7 @@ export default function App() {
     { label: "Recursos", items: [
       { id: "equipo", label: "Equipo", Icon: Users },
       { id: "maquinaria", label: "Maquinaria", Icon: Tractor },
+      { id: "zonas", label: "Zonas del campo", Icon: Flag },
       { id: "tipos_tarea", label: "Tipos de tarea", Icon: Settings },
     ]},
     { label: "Sistema", items: [
@@ -1439,7 +1442,7 @@ export default function App() {
     ...grupo,
     items: grupo.items.filter((it) => {
       if (userRole !== "jardinero") return true;
-      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
+      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
     }),
   })).filter((grupo) => grupo.items.length > 0);
 
@@ -1447,7 +1450,7 @@ export default function App() {
     mi_agenda: "Mi agenda", mi_tareas: "Mis tareas", diario: "Diario",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", inventario: "Inventario", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
+    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
   };
 
   if (cargandoAuth) {
@@ -1559,6 +1562,7 @@ export default function App() {
           {vista === "inventario" && <Inventario nombreOperario={nombreOperario} />}
           {vista === "necesidades" && <Necesidades nombreOperario={nombreOperario} origen="Mantenimiento" puedeDestachar={userRole === "superadmin"} />}
           {vista === "maquinaria" && <Maquinaria />}
+          {vista === "zonas" && <ZonasCampo nombreOperario={nombreOperario} />}
           {vista === "tipos_tarea" && <TiposTarea />}
           {vista === "fichajes" && <Fichajes userRole={userRole} nombreOperario={nombreOperario} />}
           {vista === "caudalimetro" && <Caudalimetro usuario={usuario} nombreOperario={nombreOperario} userRole={userRole} />}
@@ -1587,6 +1591,7 @@ function Dashboard({ irA }) {
   const { datos: aplicaciones } = useColeccion("mant_aplicaciones");
   const { datos: inventario } = useColeccion("mant_inventario");
   const { datos: ausencias } = useColeccion("mant_ausencias");
+  const { datos: zonas } = useColeccion("mant_zonas");
 
   const hoy = mtHoy();
   const en7 = (() => { const d = new Date(); d.setDate(d.getDate() + 7); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })();
@@ -1632,14 +1637,18 @@ function Dashboard({ irA }) {
     return s > 0 && min > 0 && s <= min;
   });
   const ausPendientes = ausencias.filter((a) => a.estado === "Pendiente");
+  const zonasProblema = zonas.filter((z) => z.estado === "Problema");
+  const zonasAtencion = zonas.filter((z) => z.estado === "Atención");
 
   const alertas = [
     partesGraves.length > 0 && { tono: "rojo", titulo: `${partesGraves.length} parte${partesGraves.length > 1 ? "s" : ""} de incidencia grave${partesGraves.length > 1 ? "s" : ""} abierto${partesGraves.length > 1 ? "s" : ""}`, detalle: nombres(partesGraves, (p) => p.titulo), ir: "partes" },
     tareasVencidas.length > 0 && { tono: "rojo", titulo: `${tareasVencidas.length} tarea${tareasVencidas.length > 1 ? "s" : ""} de campo vencida${tareasVencidas.length > 1 ? "s" : ""}`, detalle: nombres(tareasVencidas, (t) => t.titulo), ir: "tareas" },
+    zonasProblema.length > 0 && { tono: "rojo", titulo: `${zonasProblema.length} zona${zonasProblema.length > 1 ? "s" : ""} del campo con problema`, detalle: nombres(zonasProblema, (z) => z.nombre), ir: "zonas" },
     fueraServicio.length > 0 && { tono: "rojo", titulo: `${fueraServicio.length} máquina${fueraServicio.length > 1 ? "s" : ""} fuera de servicio`, detalle: nombres(fueraServicio, (m) => m.nombre), ir: "maquinaria" },
     revVencidas.length > 0 && { tono: "rojo", titulo: `${revVencidas.length} revisión${revVencidas.length > 1 ? "es" : ""} de maquinaria vencida${revVencidas.length > 1 ? "s" : ""}`, detalle: nombres(revVencidas, (x) => x.m.nombre), ir: "maquinaria" },
     aplAtrasadas.length > 0 && { tono: "rojo", titulo: `${aplAtrasadas.length} aplicación${aplAtrasadas.length > 1 ? "es" : ""} planificada${aplAtrasadas.length > 1 ? "s" : ""} atrasada${aplAtrasadas.length > 1 ? "s" : ""}`, detalle: nombres(aplAtrasadas, (a) => `${a.producto} (${a.zona})`), ir: "aplicaciones" },
     stockSin.length > 0 && { tono: "rojo", titulo: `${stockSin.length} producto${stockSin.length > 1 ? "s" : ""} sin stock`, detalle: nombres(stockSin, (p) => p.nombre), ir: "inventario" },
+    zonasAtencion.length > 0 && { tono: "ambar", titulo: `${zonasAtencion.length} zona${zonasAtencion.length > 1 ? "s" : ""} del campo requieren atención`, detalle: nombres(zonasAtencion, (z) => z.nombre), ir: "zonas" },
     enTaller.length > 0 && { tono: "ambar", titulo: `${enTaller.length} máquina${enTaller.length > 1 ? "s" : ""} en taller`, detalle: nombres(enTaller, (m) => m.nombre), ir: "maquinaria" },
     revProximas.length > 0 && { tono: "ambar", titulo: `${revProximas.length} revisión${revProximas.length > 1 ? "es" : ""} próxima${revProximas.length > 1 ? "s" : ""}`, detalle: nombres(revProximas, (x) => `${x.m.nombre} · ${x.r.texto.replace("Revisión ", "")}`), ir: "maquinaria" },
     aplProximas.length > 0 && { tono: "ambar", titulo: `${aplProximas.length} aplicación${aplProximas.length > 1 ? "es" : ""} planificada${aplProximas.length > 1 ? "s" : ""} en los próximos 7 días`, detalle: nombres(aplProximas, (a) => `${a.producto} (${fmtF(a.fechaPlanificada).slice(0, 5)})`), ir: "aplicaciones" },
@@ -2851,6 +2860,233 @@ function Inventario({ nombreOperario }) {
                   <button onClick={() => { if (window.confirm("¿Quitar este movimiento del historial? El stock no cambia.")) borrarMovimiento(m.id); }} className="text-stone-400 hover:text-red-600 p-1 shrink-0" title="Quitar del historial">
                     <Trash2 size={14} />
                   </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ZONAS DEL CAMPO
+// ═══════════════════════════════════════════════════════════════════
+function ZonasCampo({ nombreOperario }) {
+  const { datos: zonas } = useColeccion("mant_zonas", "nombre", "asc");
+  const [modal, setModal] = useState(false);
+  const [modalRapido, setModalRapido] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [filtroTipo, setFiltroTipo] = useState("Todas");
+  const [filtroEstado, setFiltroEstado] = useState("Todos");
+  const [busca, setBusca] = useState("");
+  const hoy = mtHoy();
+  const vacio = { nombre: "", tipo: ZONAS[0], cesped: "", superficie: "", direccionCorte: "", alturaCorte: "", estado: "Buena", notaFija: "" };
+  const [form, setForm] = useState(vacio);
+  const vacioNota = { fecha: hoy, texto: "", estado: "" };
+  const [nota, setNota] = useState(vacioNota);
+  const [rapido, setRapido] = useState({ hoyos: 18, greens: true, tees: true, calles: true });
+  const [creando, setCreando] = useState(false);
+
+  const actual = editando ? (zonas.find((x) => x.id === editando.id) || editando) : null;
+  const fmtF = (s) => (s ? String(s).split("-").reverse().join("/") : "—");
+  const toneZona = (e) => (e === "Problema" ? "rojo" : e === "Atención" ? "ambar" : "verde");
+
+  function abrirNueva() { setEditando(null); setForm(vacio); setNota(vacioNota); setModal(true); }
+  function abrirEditar(z) { setEditando(z); setForm({ ...vacio, ...z }); setNota(vacioNota); setModal(true); }
+
+  async function guardar() {
+    if (!form.nombre.trim()) return;
+    const { notas, id, creadoEn, ...datos } = form;
+    if (editando) await actualizarDoc("mant_zonas", editando.id, datos);
+    else await crearDoc("mant_zonas", { ...datos, notas: [] });
+    setModal(false);
+  }
+
+  async function anadirNota() {
+    if (!actual || !nota.texto.trim()) return;
+    const nueva = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      fecha: nota.fecha || hoy,
+      texto: nota.texto.trim(),
+      estado: nota.estado,
+      autor: nombreOperario || "",
+    };
+    const cambios = { notas: [...(actual.notas || []), nueva].slice(-200) };
+    if (nota.estado) cambios.estado = nota.estado;
+    await actualizarDoc("mant_zonas", actual.id, cambios);
+    if (nota.estado) setForm((f) => ({ ...f, estado: nota.estado }));
+    setNota(vacioNota);
+  }
+
+  async function borrarNota(idNota) {
+    if (!actual) return;
+    await actualizarDoc("mant_zonas", actual.id, { notas: (actual.notas || []).filter((n) => n.id !== idNota) });
+  }
+
+  async function crearRapido() {
+    const existentes = new Set(zonas.map((z) => String(z.nombre).toLowerCase()));
+    const n = Math.max(1, Math.min(36, Number(rapido.hoyos) || 18));
+    const grupos = [];
+    if (rapido.greens) grupos.push(["Green", "Green"]);
+    if (rapido.tees) grupos.push(["Tee", "Tee"]);
+    if (rapido.calles) grupos.push(["Calle", "Calle"]);
+    setCreando(true);
+    try {
+      for (const [tipo, prefijo] of grupos) {
+        for (let i = 1; i <= n; i++) {
+          const nombre = `${prefijo} ${i}`;
+          if (existentes.has(nombre.toLowerCase())) continue;
+          await crearDoc("mant_zonas", { nombre, tipo, cesped: "", superficie: "", direccionCorte: "", alturaCorte: "", estado: "Buena", notaFija: "", notas: [] });
+        }
+      }
+    } finally {
+      setCreando(false);
+      setModalRapido(false);
+    }
+  }
+
+  const resumen = useMemo(() => ({
+    atencion: zonas.filter((z) => z.estado === "Atención").length,
+    problema: zonas.filter((z) => z.estado === "Problema").length,
+  }), [zonas]);
+
+  const tiposUsados = ["Todas", ...ZONAS.filter((t) => zonas.some((z) => z.tipo === t))];
+  const visibles = zonas
+    .filter((z) => filtroTipo === "Todas" || z.tipo === filtroTipo)
+    .filter((z) => filtroEstado === "Todos" || z.estado === filtroEstado)
+    .filter((z) => !busca.trim() || String(z.nombre).toLowerCase().includes(busca.trim().toLowerCase()))
+    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), "es", { numeric: true }));
+
+  const notasActual = actual ? [...(actual.notas || [])].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))) : [];
+
+  return (
+    <div>
+      <Cabecera titulo="Zonas del campo" subtitulo="Ficha de cada green, tee y calle: césped, dirección de corte, estado y notas con fecha.">
+        <BotonSecundario onClick={() => setModalRapido(true)}>Crear zonas rápido</BotonSecundario>
+        <BotonPrimario onClick={abrirNueva}>Nueva zona</BotonPrimario>
+      </Cabecera>
+
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{zonas.length}</div>
+          <div className="text-xs text-stone-500 mt-2">Zonas</div>
+        </Tarjeta>
+        <Tarjeta className="p-4" onClick={() => setFiltroEstado(filtroEstado === "Atención" ? "Todos" : "Atención")}>
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.atencion > 0 ? "#d97706" : BLANCO, fontFamily: SERIF }}>{resumen.atencion}</div>
+          <div className="text-xs text-stone-500 mt-2">Requieren atención</div>
+        </Tarjeta>
+        <Tarjeta className="p-4" onClick={() => setFiltroEstado(filtroEstado === "Problema" ? "Todos" : "Problema")}>
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.problema > 0 ? "#dc2626" : BLANCO, fontFamily: SERIF }}>{resumen.problema}</div>
+          <div className="text-xs text-stone-500 mt-2">Con problema</div>
+        </Tarjeta>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {tiposUsados.map((t) => <PillFiltro key={t} activo={filtroTipo === t} onClick={() => setFiltroTipo(t)}>{t}</PillFiltro>)}
+        {["Todos", "Buena", "Atención", "Problema"].map((e) => <PillFiltro key={e} activo={filtroEstado === e} onClick={() => setFiltroEstado(e)}>{e === "Todos" ? "Cualquier estado" : e}</PillFiltro>)}
+        <input className={inputCls + " !w-48"} placeholder="Buscar zona…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+      </div>
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {visibles.length === 0 && (
+          <p className="text-sm text-stone-400">{zonas.length === 0 ? "Sin zonas. Usa «Crear zonas rápido» para generar greens, tees y calles de golpe." : "Ninguna zona con ese filtro."}</p>
+        )}
+        {visibles.map((z) => {
+          const ultima = [...(z.notas || [])].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0];
+          return (
+            <Tarjeta key={z.id} onClick={() => abrirEditar(z)} className="p-4">
+              <div className="flex items-start justify-between mb-1.5 gap-2">
+                <div>
+                  <p className="font-semibold" style={{ color: BLANCO }}>{z.nombre}</p>
+                  <p className="text-xs text-stone-500">{z.tipo}{z.cesped ? ` · ${z.cesped}` : ""}</p>
+                </div>
+                <Badge tone={toneZona(z.estado)}>{z.estado || "Buena"}</Badge>
+              </div>
+              {(z.direccionCorte || z.alturaCorte) && (
+                <p className="text-xs text-stone-500">
+                  {z.direccionCorte ? `Corte: ${z.direccionCorte}` : ""}{z.direccionCorte && z.alturaCorte ? " · " : ""}{z.alturaCorte ? `${z.alturaCorte} mm` : ""}
+                </p>
+              )}
+              {z.notaFija && <p className="text-xs text-stone-500 mt-1 line-clamp-2">{z.notaFija}</p>}
+              {ultima && <p className="text-xs text-stone-500 mt-1.5">Última nota ({fmtF(ultima.fecha)}): {ultima.texto.length > 70 ? ultima.texto.slice(0, 70) + "…" : ultima.texto}</p>}
+            </Tarjeta>
+          );
+        })}
+      </div>
+
+      <Modal open={modalRapido} onClose={() => !creando && setModalRapido(false)} title="Crear zonas rápido">
+        <p className="text-sm text-stone-500 mb-3">Genera las zonas numeradas (Green 1, Green 2…). Las que ya existan no se duplican.</p>
+        <Field label="Número de hoyos"><input type="number" min="1" max="36" className={inputCls} value={rapido.hoyos} onChange={(e) => setRapido({ ...rapido, hoyos: e.target.value })} /></Field>
+        <div className="flex flex-col gap-2 mb-4 text-sm text-stone-700">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={rapido.greens} onChange={(e) => setRapido({ ...rapido, greens: e.target.checked })} /> Greens</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={rapido.tees} onChange={(e) => setRapido({ ...rapido, tees: e.target.checked })} /> Tees</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={rapido.calles} onChange={(e) => setRapido({ ...rapido, calles: e.target.checked })} /> Calles</label>
+        </div>
+        <div className="flex justify-end">
+          <BotonPrimario onClick={crearRapido} icon={creando ? Loader2 : Plus}>{creando ? "Creando…" : "Crear zonas"}</BotonPrimario>
+        </div>
+      </Modal>
+
+      <Modal open={modal} onClose={() => setModal(false)} title={editando ? `Zona · ${form.nombre || ""}` : "Nueva zona"} wide>
+        <div className="grid sm:grid-cols-2 gap-x-4">
+          <Field label="Nombre"><input className={inputCls} placeholder="p.ej. Green 7" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} /></Field>
+          <Field label="Tipo">
+            <select className={inputCls} value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
+              {ZONAS.map((t) => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+          <Field label="Césped / especie"><input className={inputCls} placeholder="p.ej. Agrostis, Bermuda" value={form.cesped} onChange={(e) => setForm({ ...form, cesped: e.target.value })} /></Field>
+          <Field label="Superficie (m²)"><input type="number" className={inputCls} value={form.superficie} onChange={(e) => setForm({ ...form, superficie: e.target.value })} /></Field>
+          <Field label="Dirección de corte">
+            <select className={inputCls} value={form.direccionCorte} onChange={(e) => setForm({ ...form, direccionCorte: e.target.value })}>
+              <option value="">—</option>
+              {DIRECCIONES_CORTE.map((d) => <option key={d}>{d}</option>)}
+            </select>
+          </Field>
+          <Field label="Altura de corte (mm)"><input type="number" step="0.1" className={inputCls} value={form.alturaCorte} onChange={(e) => setForm({ ...form, alturaCorte: e.target.value })} /></Field>
+          <Field label="Estado">
+            <select className={inputCls} value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}>
+              {ESTADOS_ZONA.map((e2) => <option key={e2}>{e2}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Notas fijas (pendiente, sombra, drenaje, riego…)"><textarea className={inputCls} rows={2} value={form.notaFija} onChange={(e) => setForm({ ...form, notaFija: e.target.value })} /></Field>
+        <div className="flex justify-between items-center mt-4">
+          {editando ? (
+            <button onClick={async () => { if (window.confirm("¿Eliminar esta zona y sus notas?")) { await borrarDoc("mant_zonas", editando.id); setModal(false); } }} className="inline-flex items-center gap-1.5 text-red-600 text-sm hover:text-red-700">
+              <Trash2 size={14} /> Eliminar
+            </button>
+          ) : <span />}
+          <BotonPrimario onClick={guardar} icon={null}>Guardar ficha</BotonPrimario>
+        </div>
+
+        {editando && actual && (
+          <div className="mt-6 pt-5 border-t border-stone-200">
+            <h4 className="font-semibold text-[15px] mb-3" style={{ color: BLANCO, fontFamily: SERIF }}>Notas de seguimiento</h4>
+            <div className="rounded-lg border border-stone-200 p-3 mb-4">
+              <div className="grid sm:grid-cols-2 gap-x-3">
+                <Field label="Fecha"><input type="date" className={inputCls} value={nota.fecha} onChange={(e) => setNota({ ...nota, fecha: e.target.value })} /></Field>
+                <Field label="Cambiar estado a (opcional)">
+                  <select className={inputCls} value={nota.estado} onChange={(e) => setNota({ ...nota, estado: e.target.value })}>
+                    <option value="">Sin cambios</option>
+                    {ESTADOS_ZONA.map((e2) => <option key={e2}>{e2}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Qué has observado o hecho"><textarea className={inputCls} rows={2} placeholder="p.ej. Zona seca junto al hoyo, revisar aspersor" value={nota.texto} onChange={(e) => setNota({ ...nota, texto: e.target.value })} /></Field>
+              <div className="flex justify-end"><BotonPrimario onClick={anadirNota}>Añadir nota</BotonPrimario></div>
+            </div>
+            {notasActual.length === 0 && <p className="text-sm text-stone-400">Sin notas todavía.</p>}
+            <ul className="space-y-2">
+              {notasActual.map((n) => (
+                <li key={n.id} className="flex items-start justify-between gap-3 text-sm border-b border-stone-100 pb-2 last:border-0">
+                  <div className="min-w-0">
+                    <p className="text-stone-700"><span className="font-medium">{fmtF(n.fecha)}</span>{n.estado ? <> · <Badge tone={toneZona(n.estado)}>{n.estado}</Badge></> : null}{n.autor ? <span className="text-xs text-stone-500"> · {n.autor}</span> : null}</p>
+                    <p className="text-stone-600 mt-1">{n.texto}</p>
+                  </div>
+                  <button onClick={() => { if (window.confirm("¿Borrar esta nota?")) borrarNota(n.id); }} className="text-stone-400 hover:text-red-600 p-1 shrink-0" title="Borrar"><Trash2 size={14} /></button>
                 </li>
               ))}
             </ul>
