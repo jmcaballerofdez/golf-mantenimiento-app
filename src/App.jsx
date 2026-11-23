@@ -1430,6 +1430,7 @@ export default function App() {
       { id: "maquinaria", label: "Maquinaria", Icon: Tractor },
       { id: "zonas", label: "Zonas del campo", Icon: Flag },
       { id: "recursos", label: "Biblioteca", Icon: FileText },
+      { id: "costes", label: "Costes y presupuesto", Icon: Wallet },
       { id: "tipos_tarea", label: "Tipos de tarea", Icon: Settings },
     ]},
     { label: "Sistema", items: [
@@ -1452,7 +1453,7 @@ export default function App() {
     mi_agenda: "Mi agenda", mi_tareas: "Mis tareas", diario: "Diario",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", recursos: "Biblioteca", pizarra: "Pizarra TV", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
+    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", recursos: "Biblioteca", pizarra: "Pizarra TV", costes: "Costes y presupuesto", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
   };
 
   if (cargandoAuth) {
@@ -1568,6 +1569,7 @@ export default function App() {
           {vista === "maquinaria" && <Maquinaria />}
           {vista === "zonas" && <ZonasCampo nombreOperario={nombreOperario} />}
           {vista === "pizarra" && <PizarraTV />}
+          {vista === "costes" && <CostesMantenimiento puedeEditarPresupuesto={userRole === "superadmin"} />}
           {vista === "recursos" && <BibliotecaRecursos nombreOperario={nombreOperario} puedeGestionar={userRole !== "jardinero"} />}
           {vista === "tipos_tarea" && <TiposTarea />}
           {vista === "fichajes" && <Fichajes userRole={userRole} nombreOperario={nombreOperario} />}
@@ -3429,6 +3431,210 @@ function PizarraTV({ tv = false }) {
       </Cabecera>
       <p className="text-xs text-stone-500 mb-4">En la TV, abre mantenimiento.golfb.es/?tv=1 con una cuenta de gestor (para ver también las tareas de campo) y pulsa «Pantalla completa».</p>
       {contenido}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// COSTES Y PRESUPUESTO DE MANTENIMIENTO
+// Suma lo que ya registras en Maquinaria (intervenciones), Aplicaciones
+// (coste del producto aplicado) y Inventario (compras de material que no
+// sea fertilizante ni fitosanitario, para no contar dos veces lo que luego
+// se aplica). El presupuesto anual se guarda en mant_config/presupuesto.
+// ═══════════════════════════════════════════════════════════════════
+function CostesMantenimiento({ puedeEditarPresupuesto }) {
+  const { datos: maquinaria } = useColeccion("mant_maquinaria");
+  const { datos: aplicaciones } = useColeccion("mant_aplicaciones");
+  const { datos: productos } = useColeccion("mant_inventario");
+  const [anio, setAnio] = useState(new Date().getFullYear());
+  const [presupuestos, setPresupuestos] = useState({});
+  const [modal, setModal] = useState(false);
+  const [formP, setFormP] = useState({ maquinaria: "", aplicaciones: "", almacen: "" });
+
+  useEffect(() => {
+    const unsub = onSnapshot(docClub("mant_config", "presupuesto"), (snap) => setPresupuestos(snap.exists() ? snap.data() : {}), () => setPresupuestos({}));
+    return () => unsub();
+  }, []);
+
+  const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " €";
+  const eur2 = (n) => (Number(n) || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  const MESES_C = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  const CATS = [
+    { id: "maquinaria", label: "Maquinaria (revisiones y reparaciones)", color: "#8FB58A" },
+    { id: "aplicaciones", label: "Productos aplicados", color: "#C9A227" },
+    { id: "almacen", label: "Compras de almacén", color: "#6C8EAD" },
+  ];
+
+  const datos = useMemo(() => {
+    const mes = (f) => Number(String(f).slice(5, 7)) - 1;
+    const enAnio = (f) => String(f || "").startsWith(String(anio));
+    const porMes = { maquinaria: Array(12).fill(0), aplicaciones: Array(12).fill(0), almacen: Array(12).fill(0) };
+    const porMaquina = [];
+    maquinaria.forEach((m) => {
+      let t = 0;
+      (m.historial || []).forEach((e) => {
+        if (!enAnio(e.fecha)) return;
+        const c = Number(e.coste) || 0;
+        porMes.maquinaria[mes(e.fecha)] += c; t += c;
+      });
+      if (t > 0) porMaquina.push({ nombre: m.nombre, total: t });
+    });
+    const porZona = {};
+    aplicaciones.forEach((a) => {
+      if (a.estado === "Planificada" || !enAnio(a.fechaAplicacion)) return;
+      const c = Number(a.coste) || 0;
+      if (c <= 0) return;
+      porMes.aplicaciones[mes(a.fechaAplicacion)] += c;
+      porZona[a.zona || "Otra"] = (porZona[a.zona || "Otra"] || 0) + c;
+    });
+    productos.forEach((p) => {
+      if (["Fertilizante", "Fitosanitario"].includes(p.categoria)) return;
+      (p.movimientos || []).forEach((m) => {
+        if (m.tipo !== "Entrada" || !enAnio(m.fecha)) return;
+        const precio = Number(m.precio);
+        if (!(precio > 0)) return;
+        porMes.almacen[mes(m.fecha)] += precio * (Number(m.cantidad) || 0);
+      });
+    });
+    const totales = {};
+    CATS.forEach((c) => { totales[c.id] = porMes[c.id].reduce((s, v) => s + v, 0); });
+    const total = CATS.reduce((s, c) => s + totales[c.id], 0);
+    const mesesTotal = Array.from({ length: 12 }, (_, i) => CATS.reduce((s, c) => s + porMes[c.id][i], 0));
+    return {
+      porMes, totales, total, mesesTotal,
+      maxMes: Math.max(1, ...mesesTotal),
+      porMaquina: porMaquina.sort((a, b) => b.total - a.total).slice(0, 8),
+      porZona: Object.entries(porZona).map(([zona, t]) => ({ zona, total: t })).sort((a, b) => b.total - a.total).slice(0, 8),
+    };
+  }, [maquinaria, aplicaciones, productos, anio]);
+
+  const pAnio = presupuestos[String(anio)] || {};
+  const presTotal = CATS.reduce((s, c) => s + (Number(pAnio[c.id]) || 0), 0);
+
+  function abrirPresupuesto() {
+    setFormP({ maquinaria: pAnio.maquinaria ?? "", aplicaciones: pAnio.aplicaciones ?? "", almacen: pAnio.almacen ?? "" });
+    setModal(true);
+  }
+  async function guardarPresupuesto() {
+    const val = {};
+    CATS.forEach((c) => { val[c.id] = formP[c.id] === "" ? 0 : Number(formP[c.id]); });
+    await setDoc(docClub("mant_config", "presupuesto"), { [String(anio)]: val }, { merge: true });
+    setModal(false);
+  }
+
+  const Barra = ({ gasto, pres }) => {
+    const pct = pres > 0 ? (gasto / pres) * 100 : 0;
+    const color = pct > 100 ? "#dc2626" : pct > 85 ? "#d97706" : "#5C9A5F";
+    return (
+      <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+        <div style={{ width: Math.min(100, pct) + "%", background: color, height: "100%" }} />
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <Cabecera titulo="Costes y presupuesto" subtitulo="Lo que cuesta el mantenimiento: maquinaria, productos aplicados y compras de almacén, frente a tu presupuesto.">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setAnio(anio - 1)} className="p-2 rounded-lg hover:bg-white/5" style={{ color: BLANCO }}><ChevronLeft size={18} /></button>
+          <span className="text-sm font-medium" style={{ color: BLANCO }}>{anio}</span>
+          <button onClick={() => setAnio(anio + 1)} className="p-2 rounded-lg hover:bg-white/5" style={{ color: BLANCO }}><ChevronRight size={18} /></button>
+          {puedeEditarPresupuesto && <BotonSecundario onClick={abrirPresupuesto}>Presupuesto {anio}</BotonSecundario>}
+        </div>
+      </Cabecera>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{eur(datos.total)}</div>
+          <div className="text-xs text-stone-500 mt-2">Gasto de mantenimiento {anio}</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{presTotal > 0 ? eur(presTotal) : "—"}</div>
+          <div className="text-xs text-stone-500 mt-2">Presupuesto {anio}</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: presTotal > 0 && datos.total > presTotal ? "#dc2626" : BLANCO, fontFamily: SERIF }}>
+            {presTotal > 0 ? eur(presTotal - datos.total) : "—"}
+          </div>
+          <div className="text-xs text-stone-500 mt-2">{presTotal > 0 && datos.total > presTotal ? "Superado" : "Disponible"}</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{presTotal > 0 ? Math.round((datos.total / presTotal) * 100) + " %" : "—"}</div>
+          <div className="text-xs text-stone-500 mt-2">Presupuesto consumido</div>
+        </Tarjeta>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-4 mb-6">
+        {CATS.map((c) => (
+          <Tarjeta key={c.id} className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-2.5 h-2.5 rounded-full" style={{ background: c.color }} />
+              <span className="text-xs text-stone-500">{c.label}</span>
+            </div>
+            <div className="text-[20px] font-semibold mb-2" style={{ color: BLANCO, fontFamily: SERIF }}>
+              {eur(datos.totales[c.id])} <span className="text-xs text-stone-500 font-normal">{Number(pAnio[c.id]) > 0 ? `de ${eur(pAnio[c.id])}` : ""}</span>
+            </div>
+            {Number(pAnio[c.id]) > 0 && <Barra gasto={datos.totales[c.id]} pres={Number(pAnio[c.id])} />}
+          </Tarjeta>
+        ))}
+      </div>
+
+      <Tarjeta className="p-5 mb-6">
+        <h2 className="font-semibold mb-4 text-[15px]" style={{ color: BLANCO }}>Gasto por mes</h2>
+        <div className="flex items-end gap-2" style={{ height: 160 }}>
+          {datos.mesesTotal.map((t, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${MESES_C[i]}: ${eur2(t)}`}>
+              <div className="w-full flex flex-col-reverse rounded-t overflow-hidden" style={{ height: (t / datos.maxMes) * 130 + "px" }}>
+                {CATS.map((c) => {
+                  const v = datos.porMes[c.id][i];
+                  return v > 0 ? <div key={c.id} style={{ background: c.color, height: (v / t) * 100 + "%" }} /> : null;
+                })}
+              </div>
+              <span className="text-[11px] text-stone-500 mt-1.5">{MESES_C[i]}</span>
+            </div>
+          ))}
+        </div>
+      </Tarjeta>
+
+      <div className="grid md:grid-cols-2 gap-4 mb-6">
+        <Tarjeta className="p-5">
+          <h2 className="font-semibold mb-3 text-[15px]" style={{ color: BLANCO }}>Coste por máquina</h2>
+          {datos.porMaquina.length === 0 && <p className="text-sm text-stone-400">Sin costes de maquinaria en {anio}.</p>}
+          <ul className="space-y-2">
+            {datos.porMaquina.map((m) => (
+              <li key={m.nombre} className="flex items-center justify-between text-sm gap-3">
+                <span className="truncate text-stone-700">{m.nombre}</span>
+                <span className="font-medium shrink-0" style={{ color: BLANCO }}>{eur2(m.total)}</span>
+              </li>
+            ))}
+          </ul>
+        </Tarjeta>
+        <Tarjeta className="p-5">
+          <h2 className="font-semibold mb-3 text-[15px]" style={{ color: BLANCO }}>Productos aplicados por zona</h2>
+          {datos.porZona.length === 0 && <p className="text-sm text-stone-400">Sin costes de aplicaciones en {anio}.</p>}
+          <ul className="space-y-2">
+            {datos.porZona.map((z) => (
+              <li key={z.zona} className="flex items-center justify-between text-sm gap-3">
+                <span className="truncate text-stone-700">{z.zona}</span>
+                <span className="font-medium shrink-0" style={{ color: BLANCO }}>{eur2(z.total)}</span>
+              </li>
+            ))}
+          </ul>
+        </Tarjeta>
+      </div>
+
+      <p className="text-xs text-stone-500">
+        Los fertilizantes y fitosanitarios cuentan cuando se aplican (con su coste), no cuando se compran, para no sumarlos dos veces. Las nóminas y el resto de gastos del club están en{" "}
+        <a href="https://finanzas.golfb.es/" target="_blank" rel="noreferrer" style={{ color: DORADO }}>Finanzas</a>.
+      </p>
+
+      <Modal open={modal} onClose={() => setModal(false)} title={`Presupuesto de mantenimiento ${anio}`}>
+        <p className="text-sm text-stone-500 mb-3">Importe anual en euros para cada bloque. Déjalo vacío si no quieres presupuestarlo.</p>
+        {CATS.map((c) => (
+          <Field key={c.id} label={c.label}><input type="number" step="1" className={inputCls} value={formP[c.id]} onChange={(e) => setFormP({ ...formP, [c.id]: e.target.value })} /></Field>
+        ))}
+        <div className="flex justify-end mt-4"><BotonPrimario onClick={guardarPresupuesto} icon={null}>Guardar</BotonPrimario></div>
+      </Modal>
     </div>
   );
 }
