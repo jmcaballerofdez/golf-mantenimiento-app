@@ -93,6 +93,41 @@ const ESTADOS_TAREA = ["Pendiente", "En curso", "Completada"];
 const GRAVEDADES = ["Leve", "Moderada", "Grave"];
 const TIPOS_APLICACION = ["Fertilizante", "Fitosanitario (herbicida)", "Fitosanitario (fungicida)", "Fitosanitario (insecticida)", "Enmienda", "Otro"];
 const ESTADOS_MAQUINA = ["Operativa", "En taller", "Fuera de servicio"];
+const TIPOS_INTERVENCION = ["Revisión", "Reparación", "Avería", "Afilado / ajuste", "Otro"];
+
+// Calcula si una máquina tiene la revisión vencida o próxima, por horas y/o por fecha.
+function estadoRevisionMaquina(m) {
+  const horo = m.horometro === "" || m.horometro == null ? null : Number(m.horometro);
+  const intH = Number(m.intervaloHoras) || 0;
+  const intD = Number(m.intervaloDias) || 0;
+  let horasRest = null;
+  if (intH > 0 && horo != null) horasRest = (Number(m.ultimaRevisionHoras) || 0) + intH - horo;
+  let fechaProx = null;
+  if (intD > 0 && m.ultimaRevisionFecha) {
+    const d = new Date(m.ultimaRevisionFecha + "T00:00:00");
+    d.setDate(d.getDate() + intD);
+    fechaProx = d;
+  } else if (m.proximoMantenimiento) {
+    fechaProx = new Date(m.proximoMantenimiento + "T00:00:00");
+  }
+  let diasRest = null;
+  if (fechaProx) {
+    const h = new Date(); h.setHours(0, 0, 0, 0);
+    diasRest = Math.round((fechaProx - h) / 86400000);
+  }
+  const partes = [];
+  let nivel = "ok";
+  if (horasRest != null) {
+    if (horasRest <= 0) { nivel = "vencida"; partes.push(`pasada por ${Math.abs(Math.round(horasRest))} h`); }
+    else { if (horasRest <= 25 && nivel !== "vencida") nivel = "pronto"; partes.push(`en ${Math.round(horasRest)} h`); }
+  }
+  if (diasRest != null) {
+    if (diasRest < 0) { nivel = "vencida"; partes.push(`vencida hace ${Math.abs(diasRest)} d`); }
+    else { if (diasRest <= 15 && nivel !== "vencida") nivel = "pronto"; partes.push(diasRest === 0 ? "hoy" : `en ${diasRest} d`); }
+  }
+  if (!partes.length) return { nivel: "ok", texto: "" };
+  return { nivel, texto: (nivel === "vencida" ? "Revisión " : "Revisión ") + partes.join(" · "), horasRest, diasRest };
+}
 const CATEGORIAS_TAREA_PREDEFINIDA = ["Riego", "Corte", "Fitosanitarios", "Poda", "Mantenimiento", "Otro"];
 
 // ─── Utilidades ─────────────────────────────────────────────────────
@@ -2063,64 +2098,214 @@ function Maquinaria() {
   const { datos: maquinaria } = useColeccion("mant_maquinaria", "nombre", "asc");
   const [modal, setModal] = useState(false);
   const [editando, setEditando] = useState(null);
-  const vacio = { nombre: "", tipo: "", modelo: "", horometro: "", estado: ESTADOS_MAQUINA[0], proximoMantenimiento: "", notas: "" };
+  const vacio = { nombre: "", tipo: "", modelo: "", horometro: "", estado: ESTADOS_MAQUINA[0], proximoMantenimiento: "", intervaloHoras: "", intervaloDias: "", ultimaRevisionHoras: "", ultimaRevisionFecha: "", notas: "" };
   const [form, setForm] = useState(vacio);
+  const hoy = new Date().toISOString().slice(0, 10);
+  const vacioEntrada = { fecha: hoy, tipo: TIPOS_INTERVENCION[0], descripcion: "", horometro: "", coste: "", diasParada: "", realizadoPor: "" };
+  const [entrada, setEntrada] = useState(vacioEntrada);
 
-  function abrirNuevo() { setEditando(null); setForm(vacio); setModal(true); }
-  function abrirEditar(m) { setEditando(m); setForm({ ...vacio, ...m }); setModal(true); }
+  const actual = editando ? (maquinaria.find((x) => x.id === editando.id) || editando) : null;
+  const anioActual = new Date().getFullYear();
+
+  function abrirNuevo() { setEditando(null); setForm(vacio); setEntrada(vacioEntrada); setModal(true); }
+  function abrirEditar(m) { setEditando(m); setForm({ ...vacio, ...m }); setEntrada(vacioEntrada); setModal(true); }
 
   async function guardar() {
     if (!form.nombre.trim()) return;
-    if (editando) await actualizarDoc("mant_maquinaria", editando.id, form);
-    else await crearDoc("mant_maquinaria", form);
+    const { historial, id, creadoEn, ...datos } = form;
+    if (editando) await actualizarDoc("mant_maquinaria", editando.id, datos);
+    else await crearDoc("mant_maquinaria", { ...datos, historial: [] });
     setModal(false);
   }
 
+  async function anadirEntrada() {
+    if (!actual) return;
+    if (!entrada.descripcion.trim()) return;
+    const nueva = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      fecha: entrada.fecha || hoy,
+      tipo: entrada.tipo,
+      descripcion: entrada.descripcion.trim(),
+      horometro: entrada.horometro === "" ? "" : Number(entrada.horometro),
+      coste: entrada.coste === "" ? 0 : Number(entrada.coste),
+      diasParada: entrada.diasParada === "" ? 0 : Number(entrada.diasParada),
+      realizadoPor: entrada.realizadoPor.trim(),
+    };
+    const historial = [...(actual.historial || []), nueva];
+    const cambios = { historial };
+    const horoActual = Number(actual.horometro) || 0;
+    if (nueva.horometro !== "" && nueva.horometro > horoActual) cambios.horometro = nueva.horometro;
+    if (nueva.tipo === "Revisión") {
+      cambios.ultimaRevisionFecha = nueva.fecha;
+      cambios.ultimaRevisionHoras = nueva.horometro !== "" ? nueva.horometro : (cambios.horometro ?? horoActual);
+      cambios.proximoMantenimiento = "";
+    }
+    await actualizarDoc("mant_maquinaria", actual.id, cambios);
+    setForm((f) => ({ ...f, ...Object.fromEntries(Object.entries(cambios).filter(([k]) => k !== "historial")) }));
+    setEntrada({ ...vacioEntrada, tipo: entrada.tipo });
+  }
+
+  async function borrarEntrada(idEntrada) {
+    if (!actual) return;
+    await actualizarDoc("mant_maquinaria", actual.id, { historial: (actual.historial || []).filter((e) => e.id !== idEntrada) });
+  }
+
+  // Resumen global
+  const resumen = useMemo(() => {
+    let vencidas = 0, proximas = 0, coste = 0, parada = 0;
+    maquinaria.forEach((m) => {
+      const r = estadoRevisionMaquina(m);
+      if (r.nivel === "vencida") vencidas++;
+      else if (r.nivel === "pronto") proximas++;
+      (m.historial || []).forEach((e) => {
+        if (String(e.fecha || "").startsWith(String(anioActual))) {
+          coste += Number(e.coste) || 0;
+          parada += Number(e.diasParada) || 0;
+        }
+      });
+    });
+    return { vencidas, proximas, coste, parada };
+  }, [maquinaria, anioActual]);
+
+  const histActual = actual ? [...(actual.historial || [])].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))) : [];
+  const costeTotalActual = histActual.reduce((s, e) => s + (Number(e.coste) || 0), 0);
+  const costeAnioActual = histActual.filter((e) => String(e.fecha || "").startsWith(String(anioActual))).reduce((s, e) => s + (Number(e.coste) || 0), 0);
+  const paradaTotalActual = histActual.reduce((s, e) => s + (Number(e.diasParada) || 0), 0);
+  const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+
   return (
     <div>
-      <Cabecera titulo="Maquinaria" subtitulo="Estado y mantenimiento del parque de maquinaria.">
+      <Cabecera titulo="Maquinaria" subtitulo="Estado, revisiones, reparaciones y costes del parque de maquinaria.">
         <BotonPrimario onClick={abrirNuevo}>Añadir máquina</BotonPrimario>
       </Cabecera>
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {maquinaria.length === 0 && <p className="text-sm text-stone-400">Sin maquinaria registrada.</p>}
-        {maquinaria.map((m) => (
-          <Tarjeta key={m.id} onClick={() => abrirEditar(m)} className="p-4">
-            <div className="flex items-start justify-between mb-2">
-              <div>
-                <p className="font-semibold" style={{ color: BLANCO }}>{m.nombre}</p>
-                <p className="text-xs text-stone-500">{m.tipo} {m.modelo ? `· ${m.modelo}` : ""}</p>
-              </div>
-              <Badge tone={toneEstado(m.estado)}>{m.estado}</Badge>
-            </div>
-            {m.horometro && <p className="text-xs text-stone-500">Horómetro: {m.horometro} h</p>}
-            {m.proximoMantenimiento && <p className="text-xs text-stone-500">Próx. mantenimiento: {m.proximoMantenimiento}</p>}
-          </Tarjeta>
-        ))}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.vencidas > 0 ? "#dc2626" : BLANCO, fontFamily: SERIF }}>{resumen.vencidas}</div>
+          <div className="text-xs text-stone-500 mt-2">Revisiones vencidas</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.proximas > 0 ? "#d97706" : BLANCO, fontFamily: SERIF }}>{resumen.proximas}</div>
+          <div className="text-xs text-stone-500 mt-2">Revisiones próximas</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{eur(resumen.coste)}</div>
+          <div className="text-xs text-stone-500 mt-2">Coste mantenimiento {anioActual}</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{resumen.parada}</div>
+          <div className="text-xs text-stone-500 mt-2">Días de parada {anioActual}</div>
+        </Tarjeta>
       </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title={editando ? "Editar máquina" : "Nueva máquina"} wide>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {maquinaria.length === 0 && <p className="text-sm text-stone-400">Sin maquinaria registrada.</p>}
+        {maquinaria.map((m) => {
+          const r = estadoRevisionMaquina(m);
+          const costeAnio = (m.historial || []).filter((e) => String(e.fecha || "").startsWith(String(anioActual))).reduce((s, e) => s + (Number(e.coste) || 0), 0);
+          return (
+            <Tarjeta key={m.id} onClick={() => abrirEditar(m)} className="p-4">
+              <div className="flex items-start justify-between mb-2 gap-2">
+                <div>
+                  <p className="font-semibold" style={{ color: BLANCO }}>{m.nombre}</p>
+                  <p className="text-xs text-stone-500">{m.tipo} {m.modelo ? `· ${m.modelo}` : ""}</p>
+                </div>
+                <Badge tone={toneEstado(m.estado)}>{m.estado}</Badge>
+              </div>
+              {m.horometro !== "" && m.horometro != null && <p className="text-xs text-stone-500">Horómetro: {m.horometro} h</p>}
+              {r.texto && (
+                <p className="mt-1.5">
+                  <Badge tone={r.nivel === "vencida" ? "rojo" : r.nivel === "pronto" ? "ambar" : "verde"}>{r.texto}</Badge>
+                </p>
+              )}
+              <p className="text-xs text-stone-500 mt-1.5">
+                {(m.historial || []).length} intervenciones{costeAnio > 0 ? ` · ${eur(costeAnio)} en ${anioActual}` : ""}
+              </p>
+            </Tarjeta>
+          );
+        })}
+      </div>
+
+      <Modal open={modal} onClose={() => setModal(false)} title={editando ? `Máquina · ${form.nombre || ""}` : "Nueva máquina"} wide>
         <div className="grid sm:grid-cols-2 gap-x-4">
           <Field label="Nombre"><input className={inputCls} value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} /></Field>
           <Field label="Tipo"><input className={inputCls} placeholder="p.ej. Cortacésped de greens" value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} /></Field>
           <Field label="Modelo"><input className={inputCls} value={form.modelo} onChange={(e) => setForm({ ...form, modelo: e.target.value })} /></Field>
-          <Field label="Horómetro (h)"><input type="number" className={inputCls} value={form.horometro} onChange={(e) => setForm({ ...form, horometro: e.target.value })} /></Field>
+          <Field label="Horómetro actual (h)"><input type="number" className={inputCls} value={form.horometro} onChange={(e) => setForm({ ...form, horometro: e.target.value })} /></Field>
           <Field label="Estado">
             <select className={inputCls} value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })}>
               {ESTADOS_MAQUINA.map((e2) => <option key={e2}>{e2}</option>)}
             </select>
           </Field>
-          <Field label="Próximo mantenimiento"><input type="date" className={inputCls} value={form.proximoMantenimiento} onChange={(e) => setForm({ ...form, proximoMantenimiento: e.target.value })} /></Field>
+          <Field label="Revisar cada (horas)"><input type="number" className={inputCls} placeholder="p.ej. 250" value={form.intervaloHoras} onChange={(e) => setForm({ ...form, intervaloHoras: e.target.value })} /></Field>
+          <Field label="Revisar cada (días)"><input type="number" className={inputCls} placeholder="p.ej. 180" value={form.intervaloDias} onChange={(e) => setForm({ ...form, intervaloDias: e.target.value })} /></Field>
+          <Field label="Última revisión (fecha)"><input type="date" className={inputCls} value={form.ultimaRevisionFecha} onChange={(e) => setForm({ ...form, ultimaRevisionFecha: e.target.value })} /></Field>
+          <Field label="Última revisión (horómetro)"><input type="number" className={inputCls} value={form.ultimaRevisionHoras} onChange={(e) => setForm({ ...form, ultimaRevisionHoras: e.target.value })} /></Field>
+          <Field label="Próximo mantenimiento (fecha fija)"><input type="date" className={inputCls} value={form.proximoMantenimiento} onChange={(e) => setForm({ ...form, proximoMantenimiento: e.target.value })} /></Field>
         </div>
         <Field label="Notas"><textarea className={inputCls} rows={2} value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} /></Field>
         <div className="flex justify-between items-center mt-4">
           {editando ? (
-            <button onClick={async () => { await borrarDoc("mant_maquinaria", editando.id); setModal(false); }} className="inline-flex items-center gap-1.5 text-red-600 text-sm hover:text-red-700">
+            <button onClick={async () => { if (window.confirm("¿Eliminar esta máquina y todo su historial?")) { await borrarDoc("mant_maquinaria", editando.id); setModal(false); } }} className="inline-flex items-center gap-1.5 text-red-600 text-sm hover:text-red-700">
               <Trash2 size={14} /> Eliminar
             </button>
           ) : <span />}
-          <BotonPrimario onClick={guardar} icon={null}>Guardar</BotonPrimario>
+          <BotonPrimario onClick={guardar} icon={null}>Guardar ficha</BotonPrimario>
         </div>
+
+        {editando && (
+          <div className="mt-6 pt-5 border-t border-stone-200">
+            <h4 className="font-semibold text-[15px] mb-1" style={{ color: BLANCO, fontFamily: SERIF }}>Historial de intervenciones</h4>
+            <p className="text-xs text-stone-500 mb-3">
+              Total: {eur(costeTotalActual)} · {eur(costeAnioActual)} en {anioActual} · {paradaTotalActual} días de parada
+            </p>
+
+            <div className="rounded-lg border border-stone-200 p-3 mb-4">
+              <div className="grid sm:grid-cols-3 gap-x-3">
+                <Field label="Fecha"><input type="date" className={inputCls} value={entrada.fecha} onChange={(e) => setEntrada({ ...entrada, fecha: e.target.value })} /></Field>
+                <Field label="Tipo">
+                  <select className={inputCls} value={entrada.tipo} onChange={(e) => setEntrada({ ...entrada, tipo: e.target.value })}>
+                    {TIPOS_INTERVENCION.map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                </Field>
+                <Field label="Horómetro (h)"><input type="number" className={inputCls} value={entrada.horometro} onChange={(e) => setEntrada({ ...entrada, horometro: e.target.value })} /></Field>
+              </div>
+              <Field label="Qué se ha hecho"><input className={inputCls} placeholder="p.ej. Cambio de aceite y filtros, afilado de cuchillas" value={entrada.descripcion} onChange={(e) => setEntrada({ ...entrada, descripcion: e.target.value })} /></Field>
+              <div className="grid sm:grid-cols-3 gap-x-3">
+                <Field label="Coste (€)"><input type="number" step="0.01" className={inputCls} value={entrada.coste} onChange={(e) => setEntrada({ ...entrada, coste: e.target.value })} /></Field>
+                <Field label="Días de parada"><input type="number" className={inputCls} value={entrada.diasParada} onChange={(e) => setEntrada({ ...entrada, diasParada: e.target.value })} /></Field>
+                <Field label="Realizado por"><input className={inputCls} placeholder="Mecánico, taller…" value={entrada.realizadoPor} onChange={(e) => setEntrada({ ...entrada, realizadoPor: e.target.value })} /></Field>
+              </div>
+              <div className="flex justify-end">
+                <BotonPrimario onClick={anadirEntrada}>Añadir al historial</BotonPrimario>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-2">Si el tipo es «Revisión», se actualiza la última revisión y se recalculan los avisos.</p>
+            </div>
+
+            {histActual.length === 0 && <p className="text-sm text-stone-400">Sin intervenciones registradas.</p>}
+            <ul className="space-y-2">
+              {histActual.map((e) => (
+                <li key={e.id} className="flex items-start justify-between gap-3 text-sm border-b border-stone-100 pb-2 last:border-0">
+                  <div className="min-w-0">
+                    <p className="text-stone-700">
+                      <span className="font-medium">{e.fecha}</span> · <Badge tone={e.tipo === "Avería" ? "rojo" : e.tipo === "Revisión" ? "verde" : "neutral"}>{e.tipo}</Badge>
+                    </p>
+                    <p className="text-stone-600 mt-1">{e.descripcion}</p>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      {e.horometro !== "" && e.horometro != null ? `${e.horometro} h · ` : ""}
+                      {Number(e.coste) > 0 ? `${eur(e.coste)} · ` : ""}
+                      {Number(e.diasParada) > 0 ? `${e.diasParada} días parada · ` : ""}
+                      {e.realizadoPor || ""}
+                    </p>
+                  </div>
+                  <button onClick={() => { if (window.confirm("¿Borrar esta intervención?")) borrarEntrada(e.id); }} className="text-stone-400 hover:text-red-600 p-1 shrink-0" title="Borrar">
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Modal>
     </div>
   );
