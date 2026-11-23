@@ -13,7 +13,7 @@ import { BookOpen,
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
   GraduationCap, ShoppingCart, Wallet, Home,
   CalendarOff, Check, Settings, Plane, Stethoscope, Building2, Loader2, Shield, Lock,
-  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin,
+  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package,
 } from "lucide-react";
 
 // ─── Firebase Config ───────────────────────────────────────────────
@@ -93,6 +93,8 @@ const ESTADOS_TAREA = ["Pendiente", "En curso", "Completada"];
 const GRAVEDADES = ["Leve", "Moderada", "Grave"];
 const TIPOS_APLICACION = ["Fertilizante", "Fitosanitario (herbicida)", "Fitosanitario (fungicida)", "Fitosanitario (insecticida)", "Enmienda", "Otro"];
 const ESTADOS_MAQUINA = ["Operativa", "En taller", "Fuera de servicio"];
+const CATEGORIAS_INVENTARIO = ["Fertilizante", "Fitosanitario", "Semillas", "Combustible y lubricantes", "Repuestos", "Material de riego", "Arena y sustratos", "Otro"];
+const UNIDADES_INVENTARIO = ["kg", "l", "ud", "saco", "bidón", "caja", "m", "t"];
 const TIPOS_INTERVENCION = ["Revisión", "Reparación", "Avería", "Afilado / ajuste", "Otro"];
 
 // Calcula si una máquina tiene la revisión vencida o próxima, por horas y/o por fecha.
@@ -1390,7 +1392,7 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
 
 export default function App() {
   const { currentUser: usuario, userRole, modulosActivos, nombreOperario, empleadoId, cargandoAuth } = useAuthMantenimiento();
-  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "parte_diario", "ausencias", "mis_documentos"];
+  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "parte_diario", "ausencias", "mis_documentos"];
   const [vista, setVista] = useState("dashboard");
   useEffect(() => {
     if (userRole === "jardinero" && !VISTAS_JARDINERO.includes(vista)) {
@@ -1418,6 +1420,7 @@ export default function App() {
       { id: "partes", label: "Partes de incidencia", Icon: AlertTriangle },
       { id: "aplicaciones", label: "Aplicaciones", Icon: FlaskConical },
       { id: "necesidades", label: "Necesidades", Icon: ShoppingCart },
+      { id: "inventario", label: "Inventario", Icon: Package },
     ]},
     { label: "Recursos", items: [
       { id: "equipo", label: "Equipo", Icon: Users },
@@ -1436,7 +1439,7 @@ export default function App() {
     ...grupo,
     items: grupo.items.filter((it) => {
       if (userRole !== "jardinero") return true;
-      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
+      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
     }),
   })).filter((grupo) => grupo.items.length > 0);
 
@@ -1444,7 +1447,7 @@ export default function App() {
     mi_agenda: "Mi agenda", mi_tareas: "Mis tareas", diario: "Diario",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
+    maquinaria: "Maquinaria", inventario: "Inventario", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
   };
 
   if (cargandoAuth) {
@@ -1553,6 +1556,7 @@ export default function App() {
           {vista === "parte_diario" && <ParteDiario nombreOperario={nombreOperario} userRole={userRole} />}
           {vista === "partes" && <Partes />}
           {vista === "aplicaciones" && <Aplicaciones />}
+          {vista === "inventario" && <Inventario nombreOperario={nombreOperario} />}
           {vista === "necesidades" && <Necesidades nombreOperario={nombreOperario} origen="Mantenimiento" puedeDestachar={userRole === "superadmin"} />}
           {vista === "maquinaria" && <Maquinaria />}
           {vista === "tipos_tarea" && <TiposTarea />}
@@ -2299,6 +2303,253 @@ function Maquinaria() {
                     </p>
                   </div>
                   <button onClick={() => { if (window.confirm("¿Borrar esta intervención?")) borrarEntrada(e.id); }} className="text-stone-400 hover:text-red-600 p-1 shrink-0" title="Borrar">
+                    <Trash2 size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INVENTARIO
+// ═══════════════════════════════════════════════════════════════════
+function Inventario({ nombreOperario }) {
+  const { datos: productos } = useColeccion("mant_inventario", "nombre", "asc");
+  const [modal, setModal] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [filtroCat, setFiltroCat] = useState("Todas");
+  const [soloBajo, setSoloBajo] = useState(false);
+  const [busca, setBusca] = useState("");
+  const hoy = new Date().toISOString().slice(0, 10);
+  const vacio = { nombre: "", categoria: CATEGORIAS_INVENTARIO[0], unidad: "kg", stock: "", stockMinimo: "", precioUnitario: "", proveedor: "", ubicacion: "", notas: "" };
+  const [form, setForm] = useState(vacio);
+  const vacioMov = { fecha: hoy, tipo: "Entrada", cantidad: "", precio: "", nota: "" };
+  const [mov, setMov] = useState(vacioMov);
+
+  const actual = editando ? (productos.find((x) => x.id === editando.id) || editando) : null;
+  const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  const num = (n) => (Number(n) || 0).toLocaleString("es-ES", { maximumFractionDigits: 3 });
+  const redondea = (n) => Math.round(n * 1000) / 1000;
+
+  function abrirNuevo() { setEditando(null); setForm(vacio); setMov(vacioMov); setModal(true); }
+  function abrirEditar(p) { setEditando(p); setForm({ ...vacio, ...p }); setMov(vacioMov); setModal(true); }
+
+  async function guardar() {
+    if (!form.nombre.trim()) return;
+    const { movimientos, id, creadoEn, ...datos } = form;
+    datos.stock = form.stock === "" ? 0 : Number(form.stock);
+    datos.stockMinimo = form.stockMinimo === "" ? "" : Number(form.stockMinimo);
+    datos.precioUnitario = form.precioUnitario === "" ? "" : Number(form.precioUnitario);
+    if (editando) {
+      delete datos.stock; // el stock solo cambia con movimientos
+      await actualizarDoc("mant_inventario", editando.id, datos);
+    } else {
+      await crearDoc("mant_inventario", { ...datos, movimientos: [] });
+    }
+    setModal(false);
+  }
+
+  async function registrarMovimiento() {
+    if (!actual) return;
+    const cant = Number(mov.cantidad);
+    if (mov.cantidad === "" || isNaN(cant) || cant < 0) return;
+    if (mov.tipo !== "Ajuste" && cant === 0) return;
+    const stockAntes = Number(actual.stock) || 0;
+    let stockDespues;
+    if (mov.tipo === "Entrada") stockDespues = stockAntes + cant;
+    else if (mov.tipo === "Salida") stockDespues = stockAntes - cant;
+    else stockDespues = cant;
+    stockDespues = redondea(stockDespues);
+    if (stockDespues < 0) { window.alert("No hay suficiente stock para esa salida."); return; }
+    const nuevo = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      fecha: mov.fecha || hoy,
+      tipo: mov.tipo,
+      cantidad: mov.tipo === "Ajuste" ? redondea(stockDespues - stockAntes) : cant,
+      stockDespues,
+      precio: mov.tipo === "Entrada" && mov.precio !== "" ? Number(mov.precio) : "",
+      nota: mov.nota.trim(),
+      quien: nombreOperario || "",
+    };
+    const movimientos = [...(actual.movimientos || []), nuevo].slice(-300);
+    const cambios = { stock: stockDespues, movimientos };
+    if (nuevo.precio !== "" && !isNaN(nuevo.precio)) cambios.precioUnitario = nuevo.precio;
+    await actualizarDoc("mant_inventario", actual.id, cambios);
+    setForm((f) => ({ ...f, stock: stockDespues, ...(cambios.precioUnitario !== undefined ? { precioUnitario: cambios.precioUnitario } : {}) }));
+    setMov({ ...vacioMov, tipo: mov.tipo });
+  }
+
+  async function borrarMovimiento(idMov) {
+    // Solo se borra del historial; el stock no se toca (para corregir usa un Ajuste).
+    if (!actual) return;
+    await actualizarDoc("mant_inventario", actual.id, { movimientos: (actual.movimientos || []).filter((m) => m.id !== idMov) });
+  }
+
+  function estadoStock(p) {
+    const s = Number(p.stock) || 0;
+    const min = p.stockMinimo === "" || p.stockMinimo == null ? 0 : Number(p.stockMinimo);
+    if (s <= 0) return { texto: "Sin stock", tone: "rojo", nivel: 2 };
+    if (min > 0 && s <= min) return { texto: "Stock bajo", tone: "ambar", nivel: 1 };
+    return { texto: "OK", tone: "verde", nivel: 0 };
+  }
+
+  const resumen = useMemo(() => {
+    let bajos = 0, valor = 0;
+    productos.forEach((p) => {
+      if (estadoStock(p).nivel > 0) bajos++;
+      valor += (Number(p.stock) || 0) * (Number(p.precioUnitario) || 0);
+    });
+    return { bajos, valor };
+  }, [productos]);
+
+  const visibles = productos.filter((p) => {
+    if (filtroCat !== "Todas" && p.categoria !== filtroCat) return false;
+    if (soloBajo && estadoStock(p).nivel === 0) return false;
+    if (busca.trim() && !String(p.nombre || "").toLowerCase().includes(busca.trim().toLowerCase())) return false;
+    return true;
+  });
+
+  const movsActual = actual ? [...(actual.movimientos || [])].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || 0) : [];
+  const etiquetaCantidad = mov.tipo === "Ajuste" ? "Stock real contado" : "Cantidad";
+
+  return (
+    <div>
+      <Cabecera titulo="Inventario" subtitulo="Productos, fertilizantes, combustible y repuestos: existencias, mínimos y valor del almacén.">
+        <BotonPrimario onClick={abrirNuevo}>Nuevo producto</BotonPrimario>
+      </Cabecera>
+
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{productos.length}</div>
+          <div className="text-xs text-stone-500 mt-2">Productos</div>
+        </Tarjeta>
+        <Tarjeta className="p-4" onClick={() => setSoloBajo((v) => !v)}>
+          <div className="text-[24px] font-semibold leading-none" style={{ color: resumen.bajos > 0 ? "#d97706" : BLANCO, fontFamily: SERIF }}>{resumen.bajos}</div>
+          <div className="text-xs text-stone-500 mt-2">Con stock bajo o agotado</div>
+        </Tarjeta>
+        <Tarjeta className="p-4">
+          <div className="text-[24px] font-semibold leading-none" style={{ color: BLANCO, fontFamily: SERIF }}>{eur(resumen.valor)}</div>
+          <div className="text-xs text-stone-500 mt-2">Valor del almacén</div>
+        </Tarjeta>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {["Todas", ...CATEGORIAS_INVENTARIO].map((c) => (
+          <PillFiltro key={c} activo={filtroCat === c} onClick={() => setFiltroCat(c)}>{c}</PillFiltro>
+        ))}
+        <PillFiltro activo={soloBajo} onClick={() => setSoloBajo((v) => !v)}>Solo stock bajo</PillFiltro>
+        <input className={inputCls + " !w-52"} placeholder="Buscar producto…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+      </div>
+
+      <Tarjeta className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-stone-500 border-b border-stone-100">
+              <th className="px-5 py-3.5 font-medium">Producto</th>
+              <th className="px-5 py-3.5 font-medium">Categoría</th>
+              <th className="px-5 py-3.5 font-medium text-right">Stock</th>
+              <th className="px-5 py-3.5 font-medium text-right">Mínimo</th>
+              <th className="px-5 py-3.5 font-medium text-right">Valor</th>
+              <th className="px-5 py-3.5 font-medium">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibles.length === 0 && (
+              <tr><td colSpan={6} className="px-5 py-6 text-center text-stone-400">{productos.length === 0 ? "Sin productos. Pulsa «Nuevo producto» para empezar." : "Ningún producto con ese filtro."}</td></tr>
+            )}
+            {visibles.map((p) => {
+              const e = estadoStock(p);
+              return (
+                <tr key={p.id} onClick={() => abrirEditar(p)} className="border-b border-stone-50 last:border-0 cursor-pointer hover:bg-stone-50/70 transition">
+                  <td className="px-5 py-3.5 font-medium" style={{ color: BLANCO }}>{p.nombre}</td>
+                  <td className="px-5 py-3.5 text-stone-600">{p.categoria}</td>
+                  <td className="px-5 py-3.5 text-stone-600 text-right">{num(p.stock)} {p.unidad}</td>
+                  <td className="px-5 py-3.5 text-stone-600 text-right">{p.stockMinimo === "" || p.stockMinimo == null ? "—" : `${num(p.stockMinimo)} ${p.unidad}`}</td>
+                  <td className="px-5 py-3.5 text-stone-600 text-right">{p.precioUnitario === "" || p.precioUnitario == null ? "—" : eur((Number(p.stock) || 0) * Number(p.precioUnitario))}</td>
+                  <td className="px-5 py-3.5"><Badge tone={e.tone}>{e.texto}</Badge></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Tarjeta>
+
+      <Modal open={modal} onClose={() => setModal(false)} title={editando ? `Producto · ${form.nombre || ""}` : "Nuevo producto"} wide>
+        <div className="grid sm:grid-cols-2 gap-x-4">
+          <Field label="Nombre"><input className={inputCls} placeholder="p.ej. Nitrofoska 15-5-20" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} /></Field>
+          <Field label="Categoría">
+            <select className={inputCls} value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })}>
+              {CATEGORIAS_INVENTARIO.map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Unidad">
+            <select className={inputCls} value={form.unidad} onChange={(e) => setForm({ ...form, unidad: e.target.value })}>
+              {UNIDADES_INVENTARIO.map((u) => <option key={u}>{u}</option>)}
+            </select>
+          </Field>
+          {!editando && <Field label="Stock inicial"><input type="number" step="any" className={inputCls} value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} /></Field>}
+          <Field label="Stock mínimo (aviso)"><input type="number" step="any" className={inputCls} value={form.stockMinimo} onChange={(e) => setForm({ ...form, stockMinimo: e.target.value })} /></Field>
+          <Field label="Precio por unidad (€)"><input type="number" step="0.01" className={inputCls} value={form.precioUnitario} onChange={(e) => setForm({ ...form, precioUnitario: e.target.value })} /></Field>
+          <Field label="Proveedor"><input className={inputCls} value={form.proveedor} onChange={(e) => setForm({ ...form, proveedor: e.target.value })} /></Field>
+          <Field label="Ubicación en almacén"><input className={inputCls} placeholder="p.ej. Nave, estantería 2" value={form.ubicacion} onChange={(e) => setForm({ ...form, ubicacion: e.target.value })} /></Field>
+        </div>
+        <Field label="Notas"><textarea className={inputCls} rows={2} value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} /></Field>
+        <div className="flex justify-between items-center mt-4">
+          {editando ? (
+            <button onClick={async () => { if (window.confirm("¿Eliminar este producto y su historial?")) { await borrarDoc("mant_inventario", editando.id); setModal(false); } }} className="inline-flex items-center gap-1.5 text-red-600 text-sm hover:text-red-700">
+              <Trash2 size={14} /> Eliminar
+            </button>
+          ) : <span />}
+          <BotonPrimario onClick={guardar} icon={null}>{editando ? "Guardar ficha" : "Crear producto"}</BotonPrimario>
+        </div>
+
+        {editando && actual && (
+          <div className="mt-6 pt-5 border-t border-stone-200">
+            <h4 className="font-semibold text-[15px] mb-1" style={{ color: BLANCO, fontFamily: SERIF }}>Existencias y movimientos</h4>
+            <p className="text-xs text-stone-500 mb-3">Stock actual: <b>{num(actual.stock)} {actual.unidad}</b></p>
+
+            <div className="rounded-lg border border-stone-200 p-3 mb-4">
+              <div className="grid sm:grid-cols-3 gap-x-3">
+                <Field label="Fecha"><input type="date" className={inputCls} value={mov.fecha} onChange={(e) => setMov({ ...mov, fecha: e.target.value })} /></Field>
+                <Field label="Tipo">
+                  <select className={inputCls} value={mov.tipo} onChange={(e) => setMov({ ...mov, tipo: e.target.value })}>
+                    <option value="Entrada">Entrada (compra)</option>
+                    <option value="Salida">Salida (consumo)</option>
+                    <option value="Ajuste">Ajuste de inventario</option>
+                  </select>
+                </Field>
+                <Field label={`${etiquetaCantidad} (${actual.unidad})`}><input type="number" step="any" className={inputCls} value={mov.cantidad} onChange={(e) => setMov({ ...mov, cantidad: e.target.value })} /></Field>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-x-3">
+                {mov.tipo === "Entrada" && <Field label="Precio por unidad (€)"><input type="number" step="0.01" className={inputCls} value={mov.precio} onChange={(e) => setMov({ ...mov, precio: e.target.value })} /></Field>}
+                <Field label="Nota"><input className={inputCls} placeholder={mov.tipo === "Salida" ? "p.ej. Abonado greens 1-9" : mov.tipo === "Entrada" ? "p.ej. Albarán 4521" : "p.ej. Recuento mensual"} value={mov.nota} onChange={(e) => setMov({ ...mov, nota: e.target.value })} /></Field>
+              </div>
+              <div className="flex justify-end">
+                <BotonPrimario onClick={registrarMovimiento}>Registrar movimiento</BotonPrimario>
+              </div>
+            </div>
+
+            {movsActual.length === 0 && <p className="text-sm text-stone-400">Sin movimientos registrados.</p>}
+            <ul className="space-y-2">
+              {movsActual.map((m) => (
+                <li key={m.id} className="flex items-start justify-between gap-3 text-sm border-b border-stone-100 pb-2 last:border-0">
+                  <div className="min-w-0">
+                    <p className="text-stone-700">
+                      <span className="font-medium">{m.fecha}</span> · <Badge tone={m.tipo === "Entrada" ? "verde" : m.tipo === "Salida" ? "ambar" : "neutral"}>{m.tipo}</Badge>
+                      {" "}<span className="font-medium">{m.tipo === "Salida" ? "−" : m.cantidad > 0 && m.tipo !== "Ajuste" ? "+" : m.cantidad > 0 ? "+" : ""}{num(m.cantidad)} {actual.unidad}</span>
+                    </p>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      Quedan {num(m.stockDespues)} {actual.unidad}
+                      {m.precio !== "" && m.precio != null ? ` · ${eur(m.precio)}/${actual.unidad}` : ""}
+                      {m.nota ? ` · ${m.nota}` : ""}{m.quien ? ` · ${m.quien}` : ""}
+                    </p>
+                  </div>
+                  <button onClick={() => { if (window.confirm("¿Quitar este movimiento del historial? El stock no cambia.")) borrarMovimiento(m.id); }} className="text-stone-400 hover:text-red-600 p-1 shrink-0" title="Quitar del historial">
                     <Trash2 size={14} />
                   </button>
                 </li>
