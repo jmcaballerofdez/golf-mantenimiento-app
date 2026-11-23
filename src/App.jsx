@@ -13,7 +13,7 @@ import { BookOpen,
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
   GraduationCap, ShoppingCart, Wallet, Home,
   CalendarOff, Check, Settings, Plane, Stethoscope, Building2, Loader2, Shield, Lock,
-  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package, Flag, FileText,
+  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package, Flag, FileText, Monitor,
 } from "lucide-react";
 
 // ─── Firebase Config ───────────────────────────────────────────────
@@ -1394,7 +1394,7 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
 
 export default function App() {
   const { currentUser: usuario, userRole, modulosActivos, nombreOperario, empleadoId, cargandoAuth } = useAuthMantenimiento();
-  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "recursos", "parte_diario", "ausencias", "mis_documentos"];
+  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "recursos", "pizarra", "parte_diario", "ausencias", "mis_documentos"];
   const [vista, setVista] = useState("dashboard");
   useEffect(() => {
     if (userRole === "jardinero" && !VISTAS_JARDINERO.includes(vista)) {
@@ -1423,6 +1423,7 @@ export default function App() {
       { id: "aplicaciones", label: "Aplicaciones", Icon: FlaskConical },
       { id: "necesidades", label: "Necesidades", Icon: ShoppingCart },
       { id: "inventario", label: "Inventario", Icon: Package },
+      { id: "pizarra", label: "Pizarra TV", Icon: Monitor },
     ]},
     { label: "Recursos", items: [
       { id: "equipo", label: "Equipo", Icon: Users },
@@ -1443,7 +1444,7 @@ export default function App() {
     ...grupo,
     items: grupo.items.filter((it) => {
       if (userRole !== "jardinero") return true;
-      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "recursos", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
+      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "recursos", "pizarra", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
     }),
   })).filter((grupo) => grupo.items.length > 0);
 
@@ -1451,7 +1452,7 @@ export default function App() {
     mi_agenda: "Mi agenda", mi_tareas: "Mis tareas", diario: "Diario",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", recursos: "Biblioteca", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
+    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", recursos: "Biblioteca", pizarra: "Pizarra TV", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
   };
 
   if (cargandoAuth) {
@@ -1464,7 +1465,9 @@ export default function App() {
   if (!usuario) return <LoginMantenimiento />;
   if (!ROLES_PERMITIDOS_MANTENIMIENTO.includes(userRole)) return <AccesoPendienteMantenimiento email={usuario.email} />;
   const qrParam = new URLSearchParams(window.location.search).get("qr");
+  const tvParam = new URLSearchParams(window.location.search).get("tv");
   if (qrParam) return <FicharQR usuario={usuario} nombreOperario={nombreOperario} codigo={qrParam} />;
+  if (tvParam) return (<div><EstiloGlobalVerdeOro /><PizarraTV tv /></div>);
   if (userRole !== "superadmin" && modulosActivos && modulosActivos.mantenimiento === false) {
     return <ModuloDesactivadoMantenimiento email={usuario.email} />;
   }
@@ -1564,6 +1567,7 @@ export default function App() {
           {vista === "necesidades" && <Necesidades nombreOperario={nombreOperario} origen="Mantenimiento" puedeDestachar={userRole === "superadmin"} />}
           {vista === "maquinaria" && <Maquinaria />}
           {vista === "zonas" && <ZonasCampo nombreOperario={nombreOperario} />}
+          {vista === "pizarra" && <PizarraTV />}
           {vista === "recursos" && <BibliotecaRecursos nombreOperario={nombreOperario} puedeGestionar={userRole !== "jardinero"} />}
           {vista === "tipos_tarea" && <TiposTarea />}
           {vista === "fichajes" && <Fichajes userRole={userRole} nombreOperario={nombreOperario} />}
@@ -3269,6 +3273,162 @@ function BibliotecaRecursos({ nombreOperario, puedeGestionar }) {
           <BotonPrimario onClick={subir} icon={null}>{subiendo ? "Subiendo…" : "Guardar en la biblioteca"}</BotonPrimario>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PIZARRA TV — plan del día en pantalla grande (se abre con ?tv=1)
+// ═══════════════════════════════════════════════════════════════════
+function PizarraTV({ tv = false }) {
+  const { datos: equipo } = useColeccion("mant_equipo", "nombre", "asc");
+  const { datos: asignaciones } = useColeccion("mant_planificacion", "fecha", "asc");
+  const { datos: tareas } = useColeccion("mant_tareas");
+  const { datos: partes } = useColeccion("mant_partes");
+  const { datos: maquinaria } = useColeccion("mant_maquinaria");
+  const { datos: aplicaciones } = useColeccion("mant_aplicaciones");
+  const { datos: zonas } = useColeccion("mant_zonas");
+  const { datos: necesidades } = useColeccion("necesidades", "creadoEn", "desc");
+  const [ahora, setAhora] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setAhora(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  // Que la pantalla no se apague en modo TV
+  useEffect(() => {
+    if (!tv) return;
+    let lock = null;
+    (async () => { try { if (navigator.wakeLock) lock = await navigator.wakeLock.request("screen"); } catch (_) {} })();
+    return () => { try { lock && lock.release(); } catch (_) {} };
+  }, [tv]);
+
+  const hoy = mtHoy();
+  // La Planificación guarda la fecha de cada casilla con toISOString() sobre la medianoche local;
+  // la pizarra usa exactamente el mismo cálculo para encontrar las tareas de hoy.
+  const claveHoyPlan = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString().slice(0, 10); })();
+  const fmtF = (s) => (s ? String(s).split("-").reverse().join("/") : "");
+
+  const plan = equipo
+    .map((e) => ({ e, tareas: asignaciones.filter((a) => a.operarioId === e.id && a.fecha === claveHoyPlan).sort((a, b) => (a.orden || 0) - (b.orden || 0)) }))
+    .filter((x) => x.tareas.length > 0);
+  const sinPlan = equipo.filter((e) => !plan.some((x) => x.e.id === e.id)).map((e) => e.nombre).filter(Boolean);
+
+  const tareasCampo = tareas
+    .filter((t) => t.estado !== "Completada")
+    .sort((a, b) => (a.fechaLimite || "9999").localeCompare(b.fechaLimite || "9999"))
+    .slice(0, 8);
+
+  const avisos = [];
+  partes.filter((p) => p.estado !== "Completada").forEach((p) => avisos.push({ tono: p.gravedad === "Grave" ? "rojo" : "ambar", texto: `Incidencia${p.gravedad === "Grave" ? " GRAVE" : ""}: ${p.titulo}${p.zona ? " (" + p.zona + ")" : ""}` }));
+  maquinaria.filter((m) => m.estado !== "Operativa").forEach((m) => avisos.push({ tono: m.estado === "Fuera de servicio" ? "rojo" : "ambar", texto: `${m.nombre}: ${m.estado.toLowerCase()}` }));
+  maquinaria.forEach((m) => { const r = estadoRevisionMaquina(m); if (r.nivel === "vencida") avisos.push({ tono: "rojo", texto: `${m.nombre}: ${r.texto.toLowerCase()}` }); });
+  zonas.filter((z) => z.estado === "Problema" || z.estado === "Atención").forEach((z) => avisos.push({ tono: z.estado === "Problema" ? "rojo" : "ambar", texto: `${z.nombre}: ${z.estado.toLowerCase()}` }));
+  necesidades.filter((n) => !n.completada).slice(0, 5).forEach((n) => avisos.push({ tono: "ambar", texto: `Necesidad: ${n.texto}` }));
+
+  const aplicacionesHoy = aplicaciones.filter((a) => a.estado === "Planificada" && a.fechaPlanificada === hoy);
+  const carencias = aplicaciones.filter((a) => {
+    if (a.estado === "Planificada" || !a.fechaAplicacion || !(Number(a.plazoSeguridad) > 0)) return false;
+    const d = new Date(a.fechaAplicacion + "T00:00:00"); d.setDate(d.getDate() + Number(a.plazoSeguridad));
+    const fin = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    a._fin = fin;
+    return fin >= hoy;
+  });
+
+  const colorTono = { rojo: "#ef6a5e", ambar: "#e0a030" };
+  const fechaLarga = ahora.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const hora = ahora.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+
+  const caja = { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(169,116,60,0.45)", borderRadius: 16, padding: tv ? "22px 26px" : "16px 18px" };
+  const titulo = { fontFamily: SERIF, color: DORADO, fontSize: tv ? 26 : 18, letterSpacing: 1, textTransform: "uppercase", marginBottom: 14 };
+  const texto = { color: BLANCO, fontSize: tv ? 26 : 15, lineHeight: 1.35 };
+
+  const contenido = (
+    <div style={{ background: FONDO_APP, minHeight: tv ? "100vh" : undefined, padding: tv ? "28px 36px" : 0, borderRadius: tv ? 0 : 16, fontFamily: SANS }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: tv ? 24 : 16, gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontFamily: SERIF, color: BLANCO, fontSize: tv ? 46 : 26, textTransform: "capitalize" }}>{fechaLarga}</div>
+          <div style={{ color: BLANCO_SUAVE, fontSize: tv ? 20 : 13 }}>Mantenimiento · Golf Ciudad Real</div>
+        </div>
+        <div style={{ fontFamily: MONO, color: BLANCO, fontSize: tv ? 64 : 34 }}>{hora}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: tv ? "1.3fr 1fr" : "repeat(auto-fit, minmax(300px, 1fr))", gap: tv ? 24 : 14 }}>
+        <div style={{ display: "grid", gap: tv ? 24 : 14, alignContent: "start" }}>
+          <div style={caja}>
+            <div style={titulo}>Plan de hoy</div>
+            {plan.length === 0 && <div style={{ ...texto, color: BLANCO_TENUE }}>Sin tareas planificadas para hoy.</div>}
+            <div style={{ display: "grid", gap: tv ? 16 : 10 }}>
+              {plan.map(({ e, tareas: ts }) => (
+                <div key={e.id} style={{ display: "flex", gap: 18, alignItems: "baseline" }}>
+                  <div style={{ ...texto, fontWeight: 700, minWidth: tv ? 190 : 100 }}>{e.nombre}</div>
+                  <div style={texto}>{ts.map((t) => t.tipoTareaNombre || "Tarea").join("  ·  ")}</div>
+                </div>
+              ))}
+            </div>
+            {sinPlan.length > 0 && plan.length > 0 && <div style={{ color: BLANCO_TENUE, fontSize: tv ? 18 : 12, marginTop: 14 }}>Sin planificar: {sinPlan.join(", ")}</div>}
+          </div>
+
+          {(aplicacionesHoy.length > 0 || carencias.length > 0) && (
+            <div style={caja}>
+              <div style={titulo}>Aplicaciones y seguridad</div>
+              {aplicacionesHoy.map((a) => <div key={a.id} style={texto}>Hoy: {a.producto} · {a.zona}{a.motivo ? ` · ${a.motivo}` : ""}</div>)}
+              {carencias.map((a) => <div key={a.id} style={{ ...texto, color: colorTono.ambar }}>No acceder a {a.zona}: {a.producto} hasta el {fmtF(a._fin)}</div>)}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gap: tv ? 24 : 14, alignContent: "start" }}>
+          <div style={caja}>
+            <div style={titulo}>Tareas de campo</div>
+            {tareasCampo.length === 0 && <div style={{ ...texto, color: BLANCO_TENUE }}>Sin tareas pendientes.</div>}
+            <div style={{ display: "grid", gap: tv ? 10 : 6 }}>
+              {tareasCampo.map((t) => {
+                const venc = t.fechaLimite && t.fechaLimite < hoy;
+                return (
+                  <div key={t.id} style={{ ...texto, color: venc ? colorTono.rojo : BLANCO }}>
+                    {t.titulo}{t.asignadoA ? ` · ${t.asignadoA}` : ""}{t.fechaLimite ? ` · ${fmtF(t.fechaLimite).slice(0, 5)}` : ""}{venc ? " · VENCIDA" : ""}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={caja}>
+            <div style={titulo}>Avisos</div>
+            {avisos.length === 0 && <div style={{ ...texto, color: BLANCO_TENUE }}>Sin avisos.</div>}
+            <div style={{ display: "grid", gap: tv ? 10 : 6 }}>
+              {avisos.slice(0, tv ? 10 : 8).map((a, i) => (
+                <div key={i} style={{ ...texto, display: "flex", gap: 12, alignItems: "baseline" }}>
+                  <span style={{ width: 12, height: 12, borderRadius: 12, background: colorTono[a.tono], flexShrink: 0 }} />
+                  <span>{a.texto}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (tv) {
+    return (
+      <div>
+        {contenido}
+        <button
+          onClick={() => { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch (_) {} }}
+          style={{ position: "fixed", right: 14, bottom: 14, opacity: 0.25, background: "transparent", color: BLANCO, border: "1px solid " + BLANCO_TENUE, borderRadius: 8, padding: "6px 12px", fontSize: 13, cursor: "pointer" }}
+        >Pantalla completa</button>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <Cabecera titulo="Pizarra TV" subtitulo="Plan del día, tareas y avisos en pantalla grande. Se actualiza sola.">
+        <BotonPrimario icon={Monitor} onClick={() => window.open(window.location.pathname + "?tv=1", "_blank")}>Abrir en pantalla de TV</BotonPrimario>
+      </Cabecera>
+      <p className="text-xs text-stone-500 mb-4">En la TV, abre mantenimiento.golfb.es/?tv=1 con una cuenta de gestor (para ver también las tareas de campo) y pulsa «Pantalla completa».</p>
+      {contenido}
     </div>
   );
 }
