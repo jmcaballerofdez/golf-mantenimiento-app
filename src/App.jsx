@@ -13,7 +13,7 @@ import { BookOpen,
   LogIn, LogOut, FileDown, ShieldCheck, KeyRound,
   GraduationCap, ShoppingCart, Wallet, Home,
   CalendarOff, Check, Settings, Plane, Stethoscope, Building2, Loader2, Shield, Lock,
-  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package, Flag,
+  UserPlus, Mail, Timer, Calendar, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, GripVertical, BarChart3, Droplets, MapPin, Package, Flag, FileText,
 } from "lucide-react";
 
 // ─── Firebase Config ───────────────────────────────────────────────
@@ -1394,7 +1394,7 @@ function MisTareasVista({ db, F, ink = "#f3f6f4", soft = "#c9d3cc" }) {
 
 export default function App() {
   const { currentUser: usuario, userRole, modulosActivos, nombreOperario, empleadoId, cargandoAuth } = useAuthMantenimiento();
-  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "parte_diario", "ausencias", "mis_documentos"];
+  const VISTAS_JARDINERO = ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "recursos", "parte_diario", "ausencias", "mis_documentos"];
   const [vista, setVista] = useState("dashboard");
   useEffect(() => {
     if (userRole === "jardinero" && !VISTAS_JARDINERO.includes(vista)) {
@@ -1428,6 +1428,7 @@ export default function App() {
       { id: "equipo", label: "Equipo", Icon: Users },
       { id: "maquinaria", label: "Maquinaria", Icon: Tractor },
       { id: "zonas", label: "Zonas del campo", Icon: Flag },
+      { id: "recursos", label: "Biblioteca", Icon: FileText },
       { id: "tipos_tarea", label: "Tipos de tarea", Icon: Settings },
     ]},
     { label: "Sistema", items: [
@@ -1442,7 +1443,7 @@ export default function App() {
     ...grupo,
     items: grupo.items.filter((it) => {
       if (userRole !== "jardinero") return true;
-      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
+      return ["registro_trabajo", "planificacion", "maquinaria", "fichajes", "caudalimetro", "mi_cuenta", "necesidades", "inventario", "zonas", "recursos", "parte_diario", "ausencias", "mis_documentos"].includes(it.id);
     }),
   })).filter((grupo) => grupo.items.length > 0);
 
@@ -1450,7 +1451,7 @@ export default function App() {
     mi_agenda: "Mi agenda", mi_tareas: "Mis tareas", diario: "Diario",
     dashboard: "Panel", equipo: "Equipo", tareas: "Tareas de campo",
     partes: "Partes de incidencia", aplicaciones: "Aplicaciones",
-    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
+    maquinaria: "Maquinaria", inventario: "Inventario", zonas: "Zonas del campo", recursos: "Biblioteca", tipos_tarea: "Tipos de tarea", registro_trabajo: "Registro de trabajo", planificacion: "Planificacion", carga_trabajo: "Carga de trabajo", fichajes: "Fichajes", ausencias: "Ausencias y vacaciones", caudalimetro: "Caudalimetro", mi_cuenta: "Mi cuenta", puntos_qr: "Puntos QR", mis_documentos: "Mis documentos", documentos_admin: "Documentos de empleados", informe_horas: "Informe de horas", necesidades: "Necesidades", parte_diario: "Parte del día",
   };
 
   if (cargandoAuth) {
@@ -1563,6 +1564,7 @@ export default function App() {
           {vista === "necesidades" && <Necesidades nombreOperario={nombreOperario} origen="Mantenimiento" puedeDestachar={userRole === "superadmin"} />}
           {vista === "maquinaria" && <Maquinaria />}
           {vista === "zonas" && <ZonasCampo nombreOperario={nombreOperario} />}
+          {vista === "recursos" && <BibliotecaRecursos nombreOperario={nombreOperario} puedeGestionar={userRole !== "jardinero"} />}
           {vista === "tipos_tarea" && <TiposTarea />}
           {vista === "fichajes" && <Fichajes userRole={userRole} nombreOperario={nombreOperario} />}
           {vista === "caudalimetro" && <Caudalimetro usuario={usuario} nombreOperario={nombreOperario} userRole={userRole} />}
@@ -2567,6 +2569,7 @@ function Maquinaria() {
 
         {editando && (
           <div className="mt-6 pt-5 border-t border-stone-200">
+            <DocsRelacionados tipo="maquina" id={editando.id} />
             <h4 className="font-semibold text-[15px] mb-1" style={{ color: BLANCO, fontFamily: SERIF }}>Historial de intervenciones</h4>
             <p className="text-xs text-stone-500 mb-3">
               Total: {eur(costeTotalActual)} · {eur(costeAnioActual)} en {anioActual} · {paradaTotalActual} días de parada
@@ -2818,6 +2821,7 @@ function Inventario({ nombreOperario }) {
 
         {editando && actual && (
           <div className="mt-6 pt-5 border-t border-stone-200">
+            <DocsRelacionados tipo="producto" id={editando.id} />
             <h4 className="font-semibold text-[15px] mb-1" style={{ color: BLANCO, fontFamily: SERIF }}>Existencias y movimientos</h4>
             <p className="text-xs text-stone-500 mb-3">Stock actual: <b>{num(actual.stock)} {actual.unidad}</b></p>
 
@@ -3092,6 +3096,178 @@ function ZonasCampo({ nombreOperario }) {
             </ul>
           </div>
         )}
+      </Modal>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BIBLIOTECA DE RECURSOS (fichas técnicas, fichas de seguridad, manuales…)
+// Los archivos se guardan troceados en la propia colección "mant_recursos":
+// el documento principal lleva los datos (título, categoría…) y los trozos
+// ("<id>_p0", "<id>_p1"…) llevan el archivo. Los trozos no tienen "creadoEn",
+// así que nunca salen en el listado.
+// ═══════════════════════════════════════════════════════════════════
+const CATEGORIAS_RECURSO = ["Ficha técnica", "Ficha de seguridad (FDS)", "Manual de máquina", "Protocolo / procedimiento", "Normativa y legal", "Plano / mapa", "Otro"];
+const MAX_RECURSO_BYTES = 4 * 1024 * 1024;
+const TROZO_CHARS = 800000;
+
+async function abrirRecurso(r) {
+  if (r.url) { window.open(r.url, "_blank", "noopener"); return; }
+  const ventana = window.open("", "_blank");
+  try {
+    const trozos = await Promise.all(Array.from({ length: r.partes || 1 }, (_, i) => getDoc(docClub("mant_recursos", `${r.id}_p${i}`))));
+    if (trozos.some((t) => !t.exists())) { if (ventana) ventana.close(); alert("No se encuentra el archivo completo."); return; }
+    const dataUrl = trozos.map((t) => t.data().datos).join("");
+    const blob = await (await fetch(dataUrl)).blob();
+    const url = URL.createObjectURL(blob);
+    if (ventana) ventana.location.href = url;
+    else { const a = document.createElement("a"); a.href = url; a.download = r.archivoNombre || "documento"; a.click(); }
+  } catch (e) { if (ventana) ventana.close(); alert("No se pudo abrir el documento."); }
+}
+
+function DocsRelacionados({ tipo, id }) {
+  const { datos: recursos } = useColeccion("mant_recursos");
+  const rel = recursos.filter((r) => r.relacionTipo === tipo && r.relacionId === id);
+  return (
+    <div className="mb-5">
+      <h4 className="font-semibold text-[15px] mb-2" style={{ color: BLANCO, fontFamily: SERIF }}>Documentos relacionados</h4>
+      {rel.length === 0 && <p className="text-xs text-stone-400">Sin documentos. Puedes subirlos en la Biblioteca y asociarlos a esta ficha.</p>}
+      <ul className="space-y-1.5">
+        {rel.map((r) => (
+          <li key={r.id} className="flex items-center justify-between gap-3 text-sm">
+            <span className="min-w-0 truncate text-stone-700">{r.titulo} <span className="text-xs text-stone-500">· {r.categoria}</span></span>
+            <BotonSecundario onClick={() => abrirRecurso(r)}>Abrir</BotonSecundario>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BibliotecaRecursos({ nombreOperario, puedeGestionar }) {
+  const { datos: recursos } = useColeccion("mant_recursos");
+  const { datos: maquinaria } = useColeccion("mant_maquinaria", "nombre", "asc");
+  const { datos: productos } = useColeccion("mant_inventario", "nombre", "asc");
+  const [modal, setModal] = useState(false);
+  const [filtroCat, setFiltroCat] = useState("Todas");
+  const [busca, setBusca] = useState("");
+  const vacio = { titulo: "", categoria: CATEGORIAS_RECURSO[0], descripcion: "", relacion: "", url: "" };
+  const [form, setForm] = useState(vacio);
+  const [archivo, setArchivo] = useState(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const fmtFecha = (ts) => { const d = ts?.toDate ? ts.toDate() : null; return d ? d.toLocaleDateString("es-ES") : ""; };
+  const kb = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB");
+
+  const opcionesRelacion = [
+    ...maquinaria.map((m) => ({ v: `maquina:${m.id}`, t: `Máquina · ${m.nombre}`, tipo: "maquina", id: m.id, nombre: m.nombre })),
+    ...productos.map((p) => ({ v: `producto:${p.id}`, t: `Producto · ${p.nombre}`, tipo: "producto", id: p.id, nombre: p.nombre })),
+  ];
+
+  async function subir() {
+    if (!form.titulo.trim()) { alert("Pon un título."); return; }
+    if (!archivo && !form.url.trim()) { alert("Elige un archivo o pega un enlace."); return; }
+    if (archivo) {
+      if (archivo.size > MAX_RECURSO_BYTES) { alert("El archivo pesa " + kb(archivo.size) + ". El máximo es 4 MB. Comprímelo o pega un enlace."); return; }
+      if (!/^application\/pdf$|^image\//.test(archivo.type)) { alert("Solo se admiten PDF o imágenes."); return; }
+    }
+    const rel = opcionesRelacion.find((o) => o.v === form.relacion);
+    setSubiendo(true);
+    const ref = doc(coleccionClub("mant_recursos"));
+    let partes = 0;
+    try {
+      if (archivo) {
+        const datos = await leerComoDataUrl(archivo);
+        partes = Math.ceil(datos.length / TROZO_CHARS);
+        for (let i = 0; i < partes; i++) {
+          await setDoc(docClub("mant_recursos", `${ref.id}_p${i}`), { recursoId: ref.id, parte: i, datos: datos.slice(i * TROZO_CHARS, (i + 1) * TROZO_CHARS) });
+        }
+      }
+      await setDoc(ref, {
+        titulo: form.titulo.trim(), categoria: form.categoria, descripcion: form.descripcion.trim(),
+        relacionTipo: rel ? rel.tipo : "", relacionId: rel ? rel.id : "", relacionNombre: rel ? rel.nombre : "",
+        url: archivo ? "" : form.url.trim(),
+        archivoNombre: archivo ? archivo.name : "", mime: archivo ? archivo.type : "", bytes: archivo ? archivo.size : 0, partes,
+        subidoPor: nombreOperario || "", creadoEn: serverTimestamp(),
+      });
+      setModal(false); setForm(vacio); setArchivo(null);
+    } catch (e) {
+      for (let i = 0; i < partes; i++) { try { await deleteDoc(docClub("mant_recursos", `${ref.id}_p${i}`)); } catch (_) {} }
+      alert("No se pudo subir. Comprueba que las reglas de Firebase están actualizadas (mant_recursos).");
+    }
+    setSubiendo(false);
+  }
+
+  async function eliminar(r) {
+    if (!window.confirm(`¿Eliminar «${r.titulo}»? No se puede recuperar.`)) return;
+    for (let i = 0; i < (r.partes || 0); i++) { try { await deleteDoc(docClub("mant_recursos", `${r.id}_p${i}`)); } catch (_) {} }
+    await borrarDoc("mant_recursos", r.id);
+  }
+
+  const visibles = recursos
+    .filter((r) => filtroCat === "Todas" || r.categoria === filtroCat)
+    .filter((r) => !busca.trim() || (r.titulo + " " + (r.descripcion || "") + " " + (r.relacionNombre || "")).toLowerCase().includes(busca.trim().toLowerCase()));
+
+  return (
+    <div>
+      <Cabecera titulo="Biblioteca" subtitulo="Fichas técnicas, fichas de seguridad de productos, manuales de máquinas y protocolos, a mano para todo el equipo.">
+        {puedeGestionar && <BotonPrimario onClick={() => { setForm(vacio); setArchivo(null); setModal(true); }}>Subir documento</BotonPrimario>}
+      </Cabecera>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {["Todas", ...CATEGORIAS_RECURSO].map((c) => <PillFiltro key={c} activo={filtroCat === c} onClick={() => setFiltroCat(c)}>{c}</PillFiltro>)}
+        <input className={inputCls + " !w-52"} placeholder="Buscar…" value={busca} onChange={(e) => setBusca(e.target.value)} />
+      </div>
+
+      <div className="space-y-3">
+        {visibles.length === 0 && <p className="text-sm text-stone-400">{recursos.length === 0 ? "Aún no hay documentos en la biblioteca." : "Ningún documento con ese filtro."}</p>}
+        {visibles.map((r) => (
+          <Tarjeta key={r.id} className="p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-sm font-medium" style={{ color: BLANCO }}>{r.titulo}</p>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  {r.categoria}{r.relacionNombre ? ` · ${r.relacionNombre}` : ""}{r.url ? " · enlace" : r.bytes ? ` · ${kb(r.bytes)}` : ""}{fmtFecha(r.creadoEn) ? ` · ${fmtFecha(r.creadoEn)}` : ""}
+                </p>
+                {r.descripcion && <p className="text-xs text-stone-500 mt-1">{r.descripcion}</p>}
+              </div>
+              <div className="flex items-center gap-3">
+                <BotonSecundario onClick={() => abrirRecurso(r)}>Abrir</BotonSecundario>
+                {puedeGestionar && <button onClick={() => eliminar(r)} className="p-1 text-red-500 hover:text-red-700" title="Eliminar"><Trash2 size={16} /></button>}
+              </div>
+            </div>
+          </Tarjeta>
+        ))}
+      </div>
+
+      <Modal open={modal} onClose={() => !subiendo && setModal(false)} title="Subir documento" wide>
+        <div className="grid sm:grid-cols-2 gap-x-4">
+          <Field label="Título"><input className={inputCls} placeholder="p.ej. Ficha de seguridad Banner Maxx" value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} /></Field>
+          <Field label="Categoría">
+            <select className={inputCls} value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })}>
+              {CATEGORIAS_RECURSO.map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Relacionado con (opcional)">
+          <select className={inputCls} value={form.relacion} onChange={(e) => setForm({ ...form, relacion: e.target.value })}>
+            <option value="">— Ninguno —</option>
+            {opcionesRelacion.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
+          </select>
+        </Field>
+        <Field label="Descripción (opcional)"><input className={inputCls} value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} /></Field>
+        <div className="mb-3.5">
+          <span className="block text-[13px] font-medium text-stone-600 mb-1.5">Archivo (PDF o imagen, máximo 4 MB)</span>
+          <input id="recurso-archivo" type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => setArchivo(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+          <div className="flex items-center gap-3 flex-wrap">
+            <BotonSecundario onClick={() => document.getElementById("recurso-archivo").click()}>Elegir archivo</BotonSecundario>
+            <span className="text-sm text-stone-500">{archivo ? `${archivo.name} (${kb(archivo.size)})` : "Ningún archivo elegido"}</span>
+          </div>
+        </div>
+        {!archivo && <Field label="…o pega un enlace (web, vídeo)"><input className={inputCls} placeholder="https://" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} /></Field>}
+        <div className="flex justify-end mt-4">
+          <BotonPrimario onClick={subir} icon={null}>{subiendo ? "Subiendo…" : "Guardar en la biblioteca"}</BotonPrimario>
+        </div>
       </Modal>
     </div>
   );
